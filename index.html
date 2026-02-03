@@ -78,6 +78,13 @@ html, body {
   #rotate-warning { display: flex; }
 }
 
+    /* DEV MODE: allow desktop testing */
+@media (pointer: fine) {
+  #game-container { display: block !important; }
+  #rotate-warning { display: none !important; }
+}
+
+
 /* ===== GAME CONTAINER ===== */
 #game-container {
   position: relative;
