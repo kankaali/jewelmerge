@@ -13,10 +13,11 @@ const G = 820
 const SOFTEN = 1400
 const BASE_DAMP = 0.997
 const SURFACE_DAMP = 0.94
-const LAUNCH_POWER = 0.06
 
-// much smaller invisible backside orbit (apoapsis)
-const APOAPSIS_RADIUS = CORE_RADIUS + 220
+const BASE_LAUNCH = 0.065
+
+// tighter invisible backside orbit (shrunk)
+const APOAPSIS_RADIUS = CORE_RADIUS + 170
 
 // ===== GAME =====
 let balls = []
@@ -61,7 +62,7 @@ function applyPhysics(b) {
   b.vel.x += nx * f
   b.vel.y += ny * f
 
-  // ---- APOAPSIS TURNAROUND (real orbit) ----
+  // ---- APOAPSIS TURNAROUND ----
   const rx = b.pos.x - CENTER.x
   const ry = b.pos.y - CENTER.y
   const rd = Math.hypot(rx, ry)
@@ -69,11 +70,10 @@ function applyPhysics(b) {
   if (rd > APOAPSIS_RADIUS) {
     const onx = rx / rd
     const ony = ry / rd
-
     const vr = b.vel.x * onx + b.vel.y * ony
 
-    // outward motion dies here (micro pause)
     if (vr > 0) {
+      // real orbital pause
       b.vel.x -= onx * vr
       b.vel.y -= ony * vr
       b.vel.x *= 0.985
@@ -87,7 +87,7 @@ function applyPhysics(b) {
 
   const surfaceDist = CORE_RADIUS + b.r
 
-  // ---- SURFACE BEHAVIOR ----
+  // ---- SURFACE ----
   if (d < surfaceDist + 14) {
     const vx = b.vel.x
     const vy = b.vel.y
@@ -106,12 +106,10 @@ function applyPhysics(b) {
     b.vel.x = tx * tangential
     b.vel.y = ty * tangential
 
-    // subtle continuous rolling
     b.vel.x += tx * b.drift
     b.vel.y += ty * b.drift
 
     b.surface = true
-
     b.pos.x = CENTER.x - nx * surfaceDist
     b.pos.y = CENTER.y - ny * surfaceDist
   } else {
@@ -177,21 +175,31 @@ function drawTrajectory() {
   if (!aiming) return
 
   let pos = { ...currentBall.pos }
+
+  const massFactor = 1 / (1 + currentBall.r * 0.015)
+
   let vel = {
-    x: (aimStart.x - aimNow.x) * LAUNCH_POWER,
-    y: (aimStart.y - aimNow.y) * LAUNCH_POWER
+    x: (aimStart.x - aimNow.x) * BASE_LAUNCH * massFactor,
+    y: (aimStart.y - aimNow.y) * BASE_LAUNCH * massFactor
   }
 
-  for (let i = 0; i < 180; i++) {
-    const fake = { pos: { ...pos }, vel: { ...vel }, r: currentBall.r }
+  for (let i = 0; i < 220; i++) {
+    const fake = {
+      pos: { ...pos },
+      vel: { ...vel },
+      r: currentBall.r,
+      surface: false,
+      drift: 0
+    }
+
     applyPhysics(fake)
     pos = fake.pos
     vel = fake.vel
 
     const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
-    if (d > APOAPSIS_RADIUS + 8) break
+    if (d > APOAPSIS_RADIUS + 6) break
 
-    ctx.fillStyle = `rgba(255,255,255,${1 - i / 180})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 220})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
@@ -250,8 +258,14 @@ canvas.addEventListener("touchmove", e => {
 
 canvas.addEventListener("touchend", () => {
   if (!aiming) return
-  currentBall.vel.x = (aimStart.x - aimNow.x) * LAUNCH_POWER
-  currentBall.vel.y = (aimStart.y - aimNow.y) * LAUNCH_POWER
+
+  const massFactor = 1 / (1 + currentBall.r * 0.015)
+
+  currentBall.vel.x =
+    (aimStart.x - aimNow.x) * BASE_LAUNCH * massFactor
+  currentBall.vel.y =
+    (aimStart.y - aimNow.y) * BASE_LAUNCH * massFactor
+
   balls.push(currentBall)
   spawn()
   aiming = false
