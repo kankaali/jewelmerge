@@ -8,11 +8,8 @@ canvas.height = innerHeight
 const CENTER = { x: canvas.width / 2, y: canvas.height * 0.25 }
 
 const CORE_RADIUS = 18
-let GAMEOVER_RADIUS = 190
-
-const G = 0.25
-const DAMPING = 0.985
-const SUN_LEVEL = 8
+const G = 0.18
+const DAMPING = 0.99
 
 let balls = []
 let currentBall = null
@@ -24,12 +21,13 @@ let aimCurrent = null
 
 // ====== BALL FACTORY ======
 function createBall(x, y, level, vx = 0, vy = 0) {
+  const size = 10 + level * 4
   return {
     pos: { x, y },
     vel: { x: vx, y: vy },
     level,
-    size: 10 + level * 4,
-    state: "free"
+    size,
+    mass: size * size // important
   }
 }
 
@@ -43,29 +41,17 @@ function spawnCurrentBall() {
   nextLevel = randLevel()
 }
 
-// ====== UPDATE LOOP ======
-function update() {
-  for (let ball of balls) {
-    if (ball.state === "free") applyGravity(ball)
-  }
-  checkCollisions()
-}
-
-// ====== GRAVITY (DIRECT FALL) ======
+// ====== GRAVITY (ALWAYS ON) ======
 function applyGravity(ball) {
   const dx = CENTER.x - ball.pos.x
   const dy = CENTER.y - ball.pos.y
   const dist = Math.hypot(dx, dy)
 
-  // Stop at black hole surface
-  if (dist <= CORE_RADIUS + ball.size) {
+  if (dist < CORE_RADIUS + ball.size) {
     const nx = dx / dist
     const ny = dy / dist
     ball.pos.x = CENTER.x - nx * (CORE_RADIUS + ball.size)
     ball.pos.y = CENTER.y - ny * (CORE_RADIUS + ball.size)
-    ball.vel.x = 0
-    ball.vel.y = 0
-    ball.state = "stuck"
     return
   }
 
@@ -82,8 +68,8 @@ function applyGravity(ball) {
   ball.pos.y += ball.vel.y
 }
 
-// ====== RIGID COLLISIONS + MERGE ======
-function checkCollisions() {
+// ====== RIGID COLLISIONS (NO GAPS) ======
+function resolveCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
       const a = balls[i]
@@ -95,17 +81,28 @@ function checkCollisions() {
       const minDist = a.size + b.size
 
       if (dist < minDist && dist > 0) {
-        const overlap = minDist - dist
         const nx = dx / dist
         const ny = dy / dist
+        const overlap = minDist - dist
 
-        // rigid separation
-        a.pos.x -= nx * overlap * 0.5
-        a.pos.y -= ny * overlap * 0.5
-        b.pos.x += nx * overlap * 0.5
-        b.pos.y += ny * overlap * 0.5
+        const totalMass = a.mass + b.mass
+        const ra = b.mass / totalMass
+        const rb = a.mass / totalMass
 
-        // merge if same level
+        a.pos.x -= nx * overlap * ra
+        a.pos.y -= ny * overlap * ra
+        b.pos.x += nx * overlap * rb
+        b.pos.y += ny * overlap * rb
+
+        // impulse transfer (natural nudging)
+        const tx = b.vel.x - a.vel.x
+        const ty = b.vel.y - a.vel.y
+        a.vel.x += tx * 0.02
+        a.vel.y += ty * 0.02
+        b.vel.x -= tx * 0.02
+        b.vel.y -= ty * 0.02
+
+        // merge
         if (a.level === b.level) {
           merge(a, b)
           return
@@ -125,6 +122,12 @@ function merge(a, b) {
       a.level + 1
     )
   )
+}
+
+// ====== UPDATE ======
+function update() {
+  for (let ball of balls) applyGravity(ball)
+  resolveCollisions()
 }
 
 // ====== DRAW ======
@@ -157,42 +160,42 @@ function ballColor(level) {
   return colors[level] || "#fff"
 }
 
-// ====== FADED DOTTED TRAJECTORY ======
+// ====== TRAJECTORY (TO BLACK HOLE) ======
 function drawAimingLine() {
   if (!isAiming) return
 
-  let simPos = { x: currentBall.pos.x, y: currentBall.pos.y }
-  let simVel = {
+  let pos = { ...currentBall.pos }
+  let vel = {
     x: (aimStart.x - aimCurrent.x) * 0.05,
     y: (aimStart.y - aimCurrent.y) * 0.05
   }
 
-  for (let i = 0; i < 40; i++) {
-    const dx = CENTER.x - simPos.x
-    const dy = CENTER.y - simPos.y
+  for (let i = 0; i < 50; i++) {
+    const dx = CENTER.x - pos.x
+    const dy = CENTER.y - pos.y
     const dist = Math.hypot(dx, dy)
+
     if (dist <= CORE_RADIUS + currentBall.size) break
 
     const nx = dx / dist
     const ny = dy / dist
 
-    simVel.x += nx * G
-    simVel.y += ny * G
-    simVel.x *= DAMPING
-    simVel.y *= DAMPING
+    vel.x += nx * G
+    vel.y += ny * G
+    vel.x *= DAMPING
+    vel.y *= DAMPING
 
-    simPos.x += simVel.x
-    simPos.y += simVel.y
+    pos.x += vel.x
+    pos.y += vel.y
 
-    const alpha = 1 - i / 40
-    ctx.fillStyle = `rgba(255,255,255,${alpha})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 50})`
     ctx.beginPath()
-    ctx.arc(simPos.x, simPos.y, 2, 0, Math.PI * 2)
+    ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
   }
 }
 
-// ====== TOUCH INPUT ======
+// ====== INPUT ======
 canvas.addEventListener("touchstart", e => {
   const t = e.touches[0]
   isAiming = true
@@ -219,7 +222,6 @@ function shootBall() {
 
   currentBall.vel.x = dx * 0.05
   currentBall.vel.y = dy * 0.05
-  currentBall.state = "free"
 
   balls.push(currentBall)
   spawnCurrentBall()
@@ -230,7 +232,6 @@ function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
   drawCore()
-
   for (let ball of balls) drawBall(ball)
   if (currentBall) drawBall(currentBall)
 
