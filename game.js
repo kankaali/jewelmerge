@@ -15,9 +15,9 @@ const BASE_DAMP = 0.997
 const SURFACE_DAMP = 0.94
 const LAUNCH_POWER = 0.06
 
-// invisible universe limit (Sputnik style)
-const MAX_RADIUS = Math.min(canvas.width, canvas.height) * 0.52
-const OUTER_DAMP = 0.985
+// hard universe rule (Sputnik style)
+const MAX_RADIUS = Math.min(canvas.width, canvas.height) * 0.55
+const RADIAL_LIMIT = 0.85   // how much outward velocity is allowed
 
 // ===== GAME =====
 let balls = []
@@ -37,7 +37,7 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
     r,
     lvl,
     surface: false,
-    drift: (Math.random() - 0.5) * 0.0004
+    drift: (Math.random() - 0.5) * 0.00035
   }
 }
 
@@ -57,18 +57,33 @@ function applyPhysics(b) {
   const nx = dx / d
   const ny = dy / d
 
-  // ---- PURE CENTRAL GRAVITY ----
+  // ---- GRAVITY ----
   const f = G / (d2 + SOFTEN)
   b.vel.x += nx * f
   b.vel.y += ny * f
 
-  // ---- BASE DAMP ----
+  // ---- OUTWARD VELOCITY CLAMP ----
+  const ox = b.pos.x - CENTER.x
+  const oy = b.pos.y - CENTER.y
+  const od = Math.hypot(ox, oy)
+
+  if (od > MAX_RADIUS) {
+    const onx = ox / od
+    const ony = oy / od
+    const vr = b.vel.x * onx + b.vel.y * ony
+    if (vr > 0) {
+      b.vel.x -= onx * vr * RADIAL_LIMIT
+      b.vel.y -= ony * vr * RADIAL_LIMIT
+    }
+  }
+
+  // ---- DAMP ----
   b.vel.x *= BASE_DAMP
   b.vel.y *= BASE_DAMP
 
   const surfaceDist = CORE_RADIUS + b.r
 
-  // ---- BLACK HOLE SURFACE ----
+  // ---- SURFACE BEHAVIOR ----
   if (d < surfaceDist + 14) {
     const vx = b.vel.x
     const vy = b.vel.y
@@ -98,26 +113,8 @@ function applyPhysics(b) {
     b.surface = false
   }
 
-  // ---- POSITION ----
   b.pos.x += b.vel.x
   b.pos.y += b.vel.y
-
-  // ---- OUTER SOFT LIMIT (NO WALL, NO BEND) ----
-  const ox = b.pos.x - CENTER.x
-  const oy = b.pos.y - CENTER.y
-  const od = Math.hypot(ox, oy)
-
-  if (od > MAX_RADIUS) {
-    const nx2 = ox / od
-    const ny2 = oy / od
-    const vOut = b.vel.x * nx2 + b.vel.y * ny2
-    if (vOut > 0) {
-      b.vel.x -= nx2 * vOut * 0.65
-      b.vel.y -= ny2 * vOut * 0.65
-    }
-    b.vel.x *= OUTER_DAMP
-    b.vel.y *= OUTER_DAMP
-  }
 }
 
 // ===== COLLISIONS =====
@@ -142,14 +139,13 @@ function resolveCollisions() {
         b.pos.x += nx * overlap * 0.5
         b.pos.y += ny * overlap * 0.5
 
-        // very mild tangential nudge
         if (a.surface || b.surface) {
           const tx = -ny
           const ty = nx
-          a.vel.x += tx * 0.015
-          a.vel.y += ty * 0.015
-          b.vel.x -= tx * 0.015
-          b.vel.y -= ty * 0.015
+          a.vel.x += tx * 0.012
+          a.vel.y += ty * 0.012
+          b.vel.x -= tx * 0.012
+          b.vel.y -= ty * 0.012
         }
 
         if (a.lvl === b.lvl) {
@@ -187,13 +183,15 @@ function drawTrajectory() {
     pos = fake.pos
     vel = fake.vel
 
+    const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
+    if (d > MAX_RADIUS * 1.02) break
+
     ctx.fillStyle = `rgba(255,255,255,${1 - i / 180})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
 
-    if (Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y) <
-        CORE_RADIUS + currentBall.r) break
+    if (d < CORE_RADIUS + currentBall.r) break
   }
 }
 
