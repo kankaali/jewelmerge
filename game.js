@@ -5,14 +5,21 @@ const ctx = canvas.getContext("2d")
 canvas.width = innerWidth
 canvas.height = innerHeight
 
-const CENTER = { x: canvas.width / 2, y: canvas.height * 0.25 }
+const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
 
-const CORE_RADIUS = 18
-const NEAR_RADIUS = 130
-const LOCK_RADIUS = CORE_RADIUS + 2
+// ---- CORE ----
+const CORE_RADIUS = 20
 
-const G = 0.22
-const BASE_DAMPING = 0.985
+// ---- PHYSICS TUNING ----
+const GRAVITY_BASE = 0.06
+const GRAVITY_MAX = 0.38
+
+const FAR_RADIUS = 420
+const MID_RADIUS = 260
+const NEAR_RADIUS = 150
+const CONTACT_RADIUS = CORE_RADIUS + 4
+
+const GLOBAL_DAMPING = 0.995
 
 let balls = []
 let currentBall = null
@@ -22,9 +29,9 @@ let isAiming = false
 let aimStart = null
 let aimCurrent = null
 
-// ====== BALL FACTORY ======
+// ====== BALL ======
 function createBall(x, y, level, vx = 0, vy = 0) {
-  const size = 14 + level * 5
+  const size = 16 + level * 6
   return {
     pos: { x, y },
     vel: { x: vx, y: vy },
@@ -34,62 +41,76 @@ function createBall(x, y, level, vx = 0, vy = 0) {
 }
 
 // ====== SPAWN ======
-function spawnCurrentBall() {
+function spawnBall() {
   currentBall = createBall(
     canvas.width / 2,
-    canvas.height - 80,
+    canvas.height - 90,
     nextLevel
   )
   nextLevel = randLevel()
 }
 
-// ====== SMOOTH GUIDED GRAVITY ======
-function applyGravity(ball) {
+// ====== SMOOTHSTEP ======
+function smoothstep(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)))
+  return t * t * (3 - 2 * t)
+}
+
+// ====== CORE PHYSICS ======
+function applyPhysics(ball) {
   const dx = CENTER.x - ball.pos.x
   const dy = CENTER.y - ball.pos.y
   const dist = Math.hypot(dx, dy)
-
   const nx = dx / dist
   const ny = dy / dist
 
-  // ---- HARD SURFACE LOCK ----
-  if (dist <= LOCK_RADIUS + ball.size) {
-    ball.pos.x = CENTER.x - nx * (LOCK_RADIUS + ball.size)
-    ball.pos.y = CENTER.y - ny * (LOCK_RADIUS + ball.size)
-    ball.vel.x *= 0.2
-    ball.vel.y *= 0.2
-    return
-  }
+  // ---- GRAVITY CURVE ----
+  const gFactor =
+    smoothstep(FAR_RADIUS, MID_RADIUS, dist) * 0.4 +
+    smoothstep(MID_RADIUS, NEAR_RADIUS, dist) * 0.6
 
-  // ---- GRAVITY ----
-  ball.vel.x += nx * G
-  ball.vel.y += ny * G
+  const gravity = GRAVITY_BASE + (GRAVITY_MAX - GRAVITY_BASE) * gFactor
 
-  // ---- NEAR-CORE GUIDANCE (SMOOTH) ----
-  if (dist < NEAR_RADIUS) {
-    // Decompose velocity
-    const vr = ball.vel.x * nx + ball.vel.y * ny      // radial
-    const vtX = ball.vel.x - vr * nx                  // tangential
-    const vtY = ball.vel.y - vr * ny
+  ball.vel.x += nx * gravity
+  ball.vel.y += ny * gravity
 
-    // Smooth tangential damping factor
-    const t = (NEAR_RADIUS - dist) / NEAR_RADIUS
-    const tangentialDamping = 1 - t * 0.85   // gradual, not instant
+  // ---- VELOCITY DECOMPOSITION ----
+  const vr = ball.vel.x * nx + ball.vel.y * ny
+  const vtX = ball.vel.x - vr * nx
+  const vtY = ball.vel.y - vr * ny
 
-    ball.vel.x = vr * nx + vtX * tangentialDamping
-    ball.vel.y = vr * ny + vtY * tangentialDamping
+  // ---- TANGENTIAL DAMPING (VERY SMOOTH) ----
+  const tangentialFade = smoothstep(MID_RADIUS, NEAR_RADIUS, dist)
+  const tangentialKeep = 1 - tangentialFade * 0.92
+
+  ball.vel.x = vr * nx + vtX * tangentialKeep
+  ball.vel.y = vr * ny + vtY * tangentialKeep
+
+  // ---- RADIAL SOFT DAMPING (VERY LATE) ----
+  const radialFade = smoothstep(NEAR_RADIUS, CONTACT_RADIUS + ball.size, dist)
+  ball.vel.x *= 1 - radialFade * 0.35
+  ball.vel.y *= 1 - radialFade * 0.35
+
+  // ---- SURFACE SOFT CONSTRAINT ----
+  const surfaceDist = CONTACT_RADIUS + ball.size
+  if (dist < surfaceDist) {
+    ball.pos.x = CENTER.x - nx * surfaceDist
+    ball.pos.y = CENTER.y - ny * surfaceDist
+
+    ball.vel.x *= 0.25
+    ball.vel.y *= 0.25
   }
 
   // ---- GLOBAL DAMPING ----
-  ball.vel.x *= BASE_DAMPING
-  ball.vel.y *= BASE_DAMPING
+  ball.vel.x *= GLOBAL_DAMPING
+  ball.vel.y *= GLOBAL_DAMPING
 
   ball.pos.x += ball.vel.x
   ball.pos.y += ball.vel.y
 }
 
-// ====== POSITION COLLISIONS (CALM) ======
-function resolveCollisions() {
+// ====== COLLISIONS (POSITIONAL, CALM) ======
+function resolveBallCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
       const a = balls[i]
@@ -133,8 +154,8 @@ function merge(a, b) {
 
 // ====== UPDATE ======
 function update() {
-  for (let ball of balls) applyGravity(ball)
-  resolveCollisions()
+  for (const b of balls) applyPhysics(b)
+  resolveBallCollisions()
 }
 
 // ====== DRAW ======
@@ -145,71 +166,40 @@ function drawCore() {
   ctx.fill()
 }
 
-function drawBall(ball) {
-  ctx.fillStyle = ballColor(ball.level)
+function drawBall(b) {
+  ctx.fillStyle = ballColor(b.level)
   ctx.beginPath()
-  ctx.arc(ball.pos.x, ball.pos.y, ball.size, 0, Math.PI * 2)
+  ctx.arc(b.pos.x, b.pos.y, b.size, 0, Math.PI * 2)
   ctx.fill()
 }
 
-function ballColor(level) {
-  const colors = [
-    "#4dd0e1",
-    "#81c784",
-    "#ffd54f",
-    "#ff8a65",
-    "#ba68c8",
-    "#f06292",
-    "#90a4ae",
-    "#ff5252",
-    "#fff176"
-  ]
-  return colors[level] || "#fff"
+function ballColor(lvl) {
+  const c = ["#4dd0e1","#81c784","#ffd54f","#ff8a65","#ba68c8","#f06292"]
+  return c[lvl] || "#eee"
 }
 
-// ====== TRAJECTORY (TRUE BACKSIDE) ======
-function drawAimingLine() {
+// ====== TRAJECTORY (EXACT SAME PHYSICS) ======
+function drawTrajectory() {
   if (!isAiming) return
 
   let pos = { ...currentBall.pos }
   let vel = {
-    x: (aimStart.x - aimCurrent.x) * 0.035,
-    y: (aimStart.y - aimCurrent.y) * 0.035
+    x: (aimStart.x - aimCurrent.x) * 0.032,
+    y: (aimStart.y - aimCurrent.y) * 0.032
   }
 
-  for (let i = 0; i < 70; i++) {
-    const dx = CENTER.x - pos.x
-    const dy = CENTER.y - pos.y
-    const dist = Math.hypot(dx, dy)
+  for (let i = 0; i < 90; i++) {
+    const fake = { pos, vel, size: currentBall.size }
+    applyPhysics(fake)
+    pos = fake.pos
+    vel = fake.vel
 
-    if (dist <= LOCK_RADIUS + currentBall.size) break
-
-    const nx = dx / dist
-    const ny = dy / dist
-
-    vel.x += nx * G
-    vel.y += ny * G
-
-    if (dist < NEAR_RADIUS) {
-      const vr = vel.x * nx + vel.y * ny
-      const vtX = vel.x - vr * nx
-      const vtY = vel.y - vr * ny
-      const t = (NEAR_RADIUS - dist) / NEAR_RADIUS
-      const td = 1 - t * 0.85
-      vel.x = vr * nx + vtX * td
-      vel.y = vr * ny + vtY * td
-    }
-
-    vel.x *= BASE_DAMPING
-    vel.y *= BASE_DAMPING
-
-    pos.x += vel.x
-    pos.y += vel.y
-
-    ctx.fillStyle = `rgba(255,255,255,${1 - i / 70})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 90})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
+
+    if (Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y) < CORE_RADIUS + currentBall.size) break
   }
 }
 
@@ -229,20 +219,16 @@ canvas.addEventListener("touchmove", e => {
 
 canvas.addEventListener("touchend", () => {
   if (!isAiming) return
-  shootBall()
+  shoot()
   isAiming = false
 })
 
 // ====== SHOOT ======
-function shootBall() {
-  const dx = aimStart.x - aimCurrent.x
-  const dy = aimStart.y - aimCurrent.y
-
-  currentBall.vel.x = dx * 0.035
-  currentBall.vel.y = dy * 0.035
-
+function shoot() {
+  currentBall.vel.x = (aimStart.x - aimCurrent.x) * 0.032
+  currentBall.vel.y = (aimStart.y - aimCurrent.y) * 0.032
   balls.push(currentBall)
-  spawnCurrentBall()
+  spawnBall()
 }
 
 // ====== LOOP ======
@@ -250,12 +236,11 @@ function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
   drawCore()
-  for (let ball of balls) drawBall(ball)
+  balls.forEach(drawBall)
   if (currentBall) drawBall(currentBall)
+  drawTrajectory()
 
-  drawAimingLine()
   update()
-
   requestAnimationFrame(loop)
 }
 
@@ -265,5 +250,5 @@ function randLevel() {
 }
 
 // ====== START ======
-spawnCurrentBall()
+spawnBall()
 loop()
