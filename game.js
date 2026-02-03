@@ -9,17 +9,15 @@ const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
 const CORE_RADIUS = 24
 
 // ===== PHYSICS =====
-const G = 720
-const SOFTEN = 1200
-const BASE_DAMP = 0.998
-const SURFACE_DAMP = 0.92
-const LAUNCH_POWER = 0.055
+const G = 820
+const SOFTEN = 1400
+const BASE_DAMP = 0.997
+const SURFACE_DAMP = 0.94
+const LAUNCH_POWER = 0.06
 
-// ===== CAMERA =====
-let camScale = 1
-let camTarget = 1
-const CAM_LERP = 0.07
-const MIN_SCALE = 0.6
+// invisible universe limit (Sputnik style)
+const MAX_RADIUS = Math.min(canvas.width, canvas.height) * 0.52
+const OUTER_DAMP = 0.985
 
 // ===== GAME =====
 let balls = []
@@ -32,14 +30,14 @@ let aimNow = null
 
 // ===== BALL =====
 function createBall(x, y, lvl, vx = 0, vy = 0) {
-  const r = 20 + lvl * 6
+  const r = 22 + lvl * 6
   return {
     pos: { x, y },
     vel: { x: vx, y: vy },
     r,
     lvl,
     surface: false,
-    drift: (Math.random() - 0.5) * 0.0006
+    drift: (Math.random() - 0.5) * 0.0004
   }
 }
 
@@ -53,24 +51,25 @@ function spawn() {
 function applyPhysics(b) {
   const dx = CENTER.x - b.pos.x
   const dy = CENTER.y - b.pos.y
-  const d = Math.hypot(dx, dy)
+  const d2 = dx * dx + dy * dy
+  const d = Math.sqrt(d2)
 
   const nx = dx / d
   const ny = dy / d
 
-  // gravity
-  const f = G / (d * d + SOFTEN)
+  // ---- PURE CENTRAL GRAVITY ----
+  const f = G / (d2 + SOFTEN)
   b.vel.x += nx * f
   b.vel.y += ny * f
 
-  // damping
+  // ---- BASE DAMP ----
   b.vel.x *= BASE_DAMP
   b.vel.y *= BASE_DAMP
 
   const surfaceDist = CORE_RADIUS + b.r
 
-  if (d < surfaceDist + 18) {
-    // ---- SURFACE CONSTRAINT ----
+  // ---- BLACK HOLE SURFACE ----
+  if (d < surfaceDist + 14) {
     const vx = b.vel.x
     const vy = b.vel.y
 
@@ -79,35 +78,49 @@ function applyPhysics(b) {
     const ty = nx
     let tangential = vx * tx + vy * ty
 
-    // kill radial escape
     if (radial < 0) {
       b.vel.x -= nx * radial
       b.vel.y -= ny * radial
     }
 
-    // preserve tangential rolling
     tangential *= SURFACE_DAMP
     b.vel.x = tx * tangential
     b.vel.y = ty * tangential
 
-    // micro motion
     b.vel.x += tx * b.drift
     b.vel.y += ty * b.drift
 
     b.surface = true
 
-    // hard position clamp
     b.pos.x = CENTER.x - nx * surfaceDist
     b.pos.y = CENTER.y - ny * surfaceDist
   } else {
     b.surface = false
   }
 
+  // ---- POSITION ----
   b.pos.x += b.vel.x
   b.pos.y += b.vel.y
+
+  // ---- OUTER SOFT LIMIT (NO WALL, NO BEND) ----
+  const ox = b.pos.x - CENTER.x
+  const oy = b.pos.y - CENTER.y
+  const od = Math.hypot(ox, oy)
+
+  if (od > MAX_RADIUS) {
+    const nx2 = ox / od
+    const ny2 = oy / od
+    const vOut = b.vel.x * nx2 + b.vel.y * ny2
+    if (vOut > 0) {
+      b.vel.x -= nx2 * vOut * 0.65
+      b.vel.y -= ny2 * vOut * 0.65
+    }
+    b.vel.x *= OUTER_DAMP
+    b.vel.y *= OUTER_DAMP
+  }
 }
 
-// ===== COLLISION =====
+// ===== COLLISIONS =====
 function resolveCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
@@ -129,15 +142,14 @@ function resolveCollisions() {
         b.pos.x += nx * overlap * 0.5
         b.pos.y += ny * overlap * 0.5
 
-        // tangential impulse only if surface-bound
+        // very mild tangential nudge
         if (a.surface || b.surface) {
           const tx = -ny
           const ty = nx
-          const impulse = 0.04
-          a.vel.x += tx * impulse
-          a.vel.y += ty * impulse
-          b.vel.x -= tx * impulse
-          b.vel.y -= ty * impulse
+          a.vel.x += tx * 0.015
+          a.vel.y += ty * 0.015
+          b.vel.x -= tx * 0.015
+          b.vel.y -= ty * 0.015
         }
 
         if (a.lvl === b.lvl) {
@@ -159,19 +171,9 @@ function merge(a, b) {
   ))
 }
 
-// ===== CAMERA =====
-function updateCamera(maxRadius) {
-  const safe = Math.min(canvas.width, canvas.height) * 0.42
-  if (maxRadius > safe) {
-    camTarget = Math.max(MIN_SCALE, safe / maxRadius)
-  } else camTarget = 1
-
-  camScale += (camTarget - camScale) * CAM_LERP
-}
-
 // ===== TRAJECTORY =====
 function drawTrajectory() {
-  if (!aiming) return 0
+  if (!aiming) return
 
   let pos = { ...currentBall.pos }
   let vel = {
@@ -179,25 +181,20 @@ function drawTrajectory() {
     y: (aimStart.y - aimNow.y) * LAUNCH_POWER
   }
 
-  let maxR = 0
-
-  for (let i = 0; i < 140; i++) {
+  for (let i = 0; i < 180; i++) {
     const fake = { pos: { ...pos }, vel: { ...vel }, r: currentBall.r }
     applyPhysics(fake)
     pos = fake.pos
     vel = fake.vel
 
-    const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
-    maxR = Math.max(maxR, d)
-
-    ctx.fillStyle = `rgba(255,255,255,${1 - i / 140})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 180})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
 
-    if (d < CORE_RADIUS + currentBall.r) break
+    if (Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y) <
+        CORE_RADIUS + currentBall.r) break
   }
-  return maxR
 }
 
 // ===== DRAW =====
@@ -223,30 +220,14 @@ function color(l) {
 function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  let maxRadius = 0
-  balls.forEach(b => {
-    applyPhysics(b)
-    maxRadius = Math.max(maxRadius,
-      Math.hypot(b.pos.x - CENTER.x, b.pos.y - CENTER.y))
-  })
-
+  balls.forEach(applyPhysics)
   resolveCollisions()
-
-  ctx.save()
-  ctx.translate(canvas.width / 2, canvas.height / 2)
-  ctx.scale(camScale, camScale)
-  ctx.translate(-canvas.width / 2, -canvas.height / 2)
 
   drawCore()
   balls.forEach(drawBall)
   if (currentBall) drawBall(currentBall)
 
-  const trajR = drawTrajectory()
-  maxRadius = Math.max(maxRadius, trajR)
-
-  ctx.restore()
-
-  updateCamera(maxRadius)
+  drawTrajectory()
   requestAnimationFrame(loop)
 }
 
