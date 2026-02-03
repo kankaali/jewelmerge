@@ -8,7 +8,7 @@ canvas.height = innerHeight
 const CENTER = { x: canvas.width / 2, y: canvas.height * 0.25 }
 
 const CORE_RADIUS = 18
-const G = 0.18
+const G = 0.5
 const DAMPING = 0.99
 
 let balls = []
