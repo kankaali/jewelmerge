@@ -125,10 +125,6 @@ function merge(a, b) {
   )
 }
 
-ctx.fillStyle = "red"
-ctx.beginPath()
-ctx.arc(canvas.width / 2, canvas.height / 2, 20, 0, Math.PI * 2)
-ctx.fill()
 
 
 // ====== UTILS ======
