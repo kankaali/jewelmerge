@@ -8,9 +8,11 @@ canvas.height = innerHeight
 const CENTER = { x: canvas.width / 2, y: canvas.height * 0.25 }
 
 const CORE_RADIUS = 18
-const SETTLE_RADIUS = 90   // critical
-const G = 0.18             // much weaker
-const DAMPING = 0.97
+const NEAR_RADIUS = 130
+const LOCK_RADIUS = CORE_RADIUS + 2
+
+const G = 0.22
+const BASE_DAMPING = 0.985
 
 let balls = []
 let currentBall = null
@@ -22,7 +24,7 @@ let aimCurrent = null
 
 // ====== BALL FACTORY ======
 function createBall(x, y, level, vx = 0, vy = 0) {
-  const size = 14 + level * 5   // BIGGER balls (Sputnik-like)
+  const size = 14 + level * 5
   return {
     pos: { x, y },
     vel: { x: vx, y: vy },
@@ -41,7 +43,7 @@ function spawnCurrentBall() {
   nextLevel = randLevel()
 }
 
-// ====== GUIDED GRAVITY ======
+// ====== SMOOTH GUIDED GRAVITY ======
 function applyGravity(ball) {
   const dx = CENTER.x - ball.pos.x
   const dy = CENTER.y - ball.pos.y
@@ -50,38 +52,43 @@ function applyGravity(ball) {
   const nx = dx / dist
   const ny = dy / dist
 
-  // HARD LOCK ON CORE SURFACE
-  if (dist <= CORE_RADIUS + ball.size) {
-    ball.pos.x = CENTER.x - nx * (CORE_RADIUS + ball.size)
-    ball.pos.y = CENTER.y - ny * (CORE_RADIUS + ball.size)
-    ball.vel.x = 0
-    ball.vel.y = 0
+  // ---- HARD SURFACE LOCK ----
+  if (dist <= LOCK_RADIUS + ball.size) {
+    ball.pos.x = CENTER.x - nx * (LOCK_RADIUS + ball.size)
+    ball.pos.y = CENTER.y - ny * (LOCK_RADIUS + ball.size)
+    ball.vel.x *= 0.2
+    ball.vel.y *= 0.2
     return
   }
 
-  // SETTLING ZONE (NO ORBITS ALLOWED)
-  if (dist < SETTLE_RADIUS) {
-    // move radially only
-    ball.vel.x = nx * 0.8
-    ball.vel.y = ny * 0.8
-
-    ball.pos.x += ball.vel.x
-    ball.pos.y += ball.vel.y
-    return
-  }
-
-  // FAR ZONE (NORMAL MOTION)
+  // ---- GRAVITY ----
   ball.vel.x += nx * G
   ball.vel.y += ny * G
 
-  ball.vel.x *= DAMPING
-  ball.vel.y *= DAMPING
+  // ---- NEAR-CORE GUIDANCE (SMOOTH) ----
+  if (dist < NEAR_RADIUS) {
+    // Decompose velocity
+    const vr = ball.vel.x * nx + ball.vel.y * ny      // radial
+    const vtX = ball.vel.x - vr * nx                  // tangential
+    const vtY = ball.vel.y - vr * ny
+
+    // Smooth tangential damping factor
+    const t = (NEAR_RADIUS - dist) / NEAR_RADIUS
+    const tangentialDamping = 1 - t * 0.85   // gradual, not instant
+
+    ball.vel.x = vr * nx + vtX * tangentialDamping
+    ball.vel.y = vr * ny + vtY * tangentialDamping
+  }
+
+  // ---- GLOBAL DAMPING ----
+  ball.vel.x *= BASE_DAMPING
+  ball.vel.y *= BASE_DAMPING
 
   ball.pos.x += ball.vel.x
   ball.pos.y += ball.vel.y
 }
 
-// ====== POSITION-ONLY COLLISIONS ======
+// ====== POSITION COLLISIONS (CALM) ======
 function resolveCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
@@ -98,13 +105,11 @@ function resolveCollisions() {
         const ny = dy / dist
         const overlap = minDist - dist
 
-        // position correction only
         a.pos.x -= nx * overlap * 0.5
         a.pos.y -= ny * overlap * 0.5
         b.pos.x += nx * overlap * 0.5
         b.pos.y += ny * overlap * 0.5
 
-        // MERGE (no velocity chaos)
         if (a.level === b.level) {
           merge(a, b)
           return
@@ -162,7 +167,7 @@ function ballColor(level) {
   return colors[level] || "#fff"
 }
 
-// ====== TRAJECTORY (MATCHES FINAL PATH) ======
+// ====== TRAJECTORY (TRUE BACKSIDE) ======
 function drawAimingLine() {
   if (!isAiming) return
 
@@ -172,30 +177,36 @@ function drawAimingLine() {
     y: (aimStart.y - aimCurrent.y) * 0.035
   }
 
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 70; i++) {
     const dx = CENTER.x - pos.x
     const dy = CENTER.y - pos.y
     const dist = Math.hypot(dx, dy)
 
-    if (dist <= CORE_RADIUS + currentBall.size) break
+    if (dist <= LOCK_RADIUS + currentBall.size) break
 
     const nx = dx / dist
     const ny = dy / dist
 
-    if (dist < SETTLE_RADIUS) {
-      vel.x = nx * 0.8
-      vel.y = ny * 0.8
-    } else {
-      vel.x += nx * G
-      vel.y += ny * G
-      vel.x *= DAMPING
-      vel.y *= DAMPING
+    vel.x += nx * G
+    vel.y += ny * G
+
+    if (dist < NEAR_RADIUS) {
+      const vr = vel.x * nx + vel.y * ny
+      const vtX = vel.x - vr * nx
+      const vtY = vel.y - vr * ny
+      const t = (NEAR_RADIUS - dist) / NEAR_RADIUS
+      const td = 1 - t * 0.85
+      vel.x = vr * nx + vtX * td
+      vel.y = vr * ny + vtY * td
     }
+
+    vel.x *= BASE_DAMPING
+    vel.y *= BASE_DAMPING
 
     pos.x += vel.x
     pos.y += vel.y
 
-    ctx.fillStyle = `rgba(255,255,255,${1 - i / 60})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 70})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
