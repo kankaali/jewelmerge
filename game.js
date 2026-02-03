@@ -8,11 +8,9 @@ canvas.height = innerHeight
 const CENTER = { x: canvas.width / 2, y: canvas.height * 0.25 }
 
 const CORE_RADIUS = 18
-const CORE_LOCK_RADIUS = 70   // strong influence zone
-const G = 0.45
-const DAMPING = 0.985
-const CORE_DAMPING = 0.6      // heavy damping near core
-const COLLISION_PUSH = 0.003  // VERY soft
+const SETTLE_RADIUS = 90   // critical
+const G = 0.18             // much weaker
+const DAMPING = 0.97
 
 let balls = []
 let currentBall = null
@@ -24,13 +22,12 @@ let aimCurrent = null
 
 // ====== BALL FACTORY ======
 function createBall(x, y, level, vx = 0, vy = 0) {
-  const size = 10 + level * 4
+  const size = 14 + level * 5   // BIGGER balls (Sputnik-like)
   return {
     pos: { x, y },
     vel: { x: vx, y: vy },
     level,
-    size,
-    mass: size * size
+    size
   }
 }
 
@@ -44,7 +41,7 @@ function spawnCurrentBall() {
   nextLevel = randLevel()
 }
 
-// ====== GRAVITY ======
+// ====== GUIDED GRAVITY ======
 function applyGravity(ball) {
   const dx = CENTER.x - ball.pos.x
   const dy = CENTER.y - ball.pos.y
@@ -53,35 +50,38 @@ function applyGravity(ball) {
   const nx = dx / dist
   const ny = dy / dist
 
-  // core surface lock
-  if (dist < CORE_RADIUS + ball.size) {
+  // HARD LOCK ON CORE SURFACE
+  if (dist <= CORE_RADIUS + ball.size) {
     ball.pos.x = CENTER.x - nx * (CORE_RADIUS + ball.size)
     ball.pos.y = CENTER.y - ny * (CORE_RADIUS + ball.size)
-
-    // kill most motion
-    ball.vel.x *= 0.15
-    ball.vel.y *= 0.15
+    ball.vel.x = 0
+    ball.vel.y = 0
     return
   }
 
-  // gravity always applies
+  // SETTLING ZONE (NO ORBITS ALLOWED)
+  if (dist < SETTLE_RADIUS) {
+    // move radially only
+    ball.vel.x = nx * 0.8
+    ball.vel.y = ny * 0.8
+
+    ball.pos.x += ball.vel.x
+    ball.pos.y += ball.vel.y
+    return
+  }
+
+  // FAR ZONE (NORMAL MOTION)
   ball.vel.x += nx * G
   ball.vel.y += ny * G
 
-  // strong damping near core
-  if (dist < CORE_LOCK_RADIUS) {
-    ball.vel.x *= CORE_DAMPING
-    ball.vel.y *= CORE_DAMPING
-  } else {
-    ball.vel.x *= DAMPING
-    ball.vel.y *= DAMPING
-  }
+  ball.vel.x *= DAMPING
+  ball.vel.y *= DAMPING
 
   ball.pos.x += ball.vel.x
   ball.pos.y += ball.vel.y
 }
 
-// ====== COLLISIONS ======
+// ====== POSITION-ONLY COLLISIONS ======
 function resolveCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
@@ -98,25 +98,13 @@ function resolveCollisions() {
         const ny = dy / dist
         const overlap = minDist - dist
 
-        const totalMass = a.mass + b.mass
-        const ra = b.mass / totalMass
-        const rb = a.mass / totalMass
+        // position correction only
+        a.pos.x -= nx * overlap * 0.5
+        a.pos.y -= ny * overlap * 0.5
+        b.pos.x += nx * overlap * 0.5
+        b.pos.y += ny * overlap * 0.5
 
-        a.pos.x -= nx * overlap * ra
-        a.pos.y -= ny * overlap * ra
-        b.pos.x += nx * overlap * rb
-        b.pos.y += ny * overlap * rb
-
-        // MICRO impulse only
-        const tx = b.vel.x - a.vel.x
-        const ty = b.vel.y - a.vel.y
-
-        a.vel.x += tx * COLLISION_PUSH
-        a.vel.y += ty * COLLISION_PUSH
-        b.vel.x -= tx * COLLISION_PUSH
-        b.vel.y -= ty * COLLISION_PUSH
-
-        // merge
+        // MERGE (no velocity chaos)
         if (a.level === b.level) {
           merge(a, b)
           return
@@ -174,17 +162,17 @@ function ballColor(level) {
   return colors[level] || "#fff"
 }
 
-// ====== TRAJECTORY ======
+// ====== TRAJECTORY (MATCHES FINAL PATH) ======
 function drawAimingLine() {
   if (!isAiming) return
 
   let pos = { ...currentBall.pos }
   let vel = {
-    x: (aimStart.x - aimCurrent.x) * 0.05,
-    y: (aimStart.y - aimCurrent.y) * 0.05
+    x: (aimStart.x - aimCurrent.x) * 0.035,
+    y: (aimStart.y - aimCurrent.y) * 0.035
   }
 
-  for (let i = 0; i < 55; i++) {
+  for (let i = 0; i < 60; i++) {
     const dx = CENTER.x - pos.x
     const dy = CENTER.y - pos.y
     const dist = Math.hypot(dx, dy)
@@ -194,15 +182,20 @@ function drawAimingLine() {
     const nx = dx / dist
     const ny = dy / dist
 
-    vel.x += nx * G
-    vel.y += ny * G
-    vel.x *= DAMPING
-    vel.y *= DAMPING
+    if (dist < SETTLE_RADIUS) {
+      vel.x = nx * 0.8
+      vel.y = ny * 0.8
+    } else {
+      vel.x += nx * G
+      vel.y += ny * G
+      vel.x *= DAMPING
+      vel.y *= DAMPING
+    }
 
     pos.x += vel.x
     pos.y += vel.y
 
-    ctx.fillStyle = `rgba(255,255,255,${1 - i / 55})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 60})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
@@ -234,8 +227,8 @@ function shootBall() {
   const dx = aimStart.x - aimCurrent.x
   const dy = aimStart.y - aimCurrent.y
 
-  currentBall.vel.x = dx * 0.05
-  currentBall.vel.y = dy * 0.05
+  currentBall.vel.x = dx * 0.035
+  currentBall.vel.y = dy * 0.035
 
   balls.push(currentBall)
   spawnCurrentBall()
