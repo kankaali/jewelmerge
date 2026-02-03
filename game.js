@@ -11,10 +11,14 @@ const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
 const CORE_RADIUS = 22
 
 // ---- PHYSICS ----
-const G = 420        // gravity strength
-const SOFTENING = 900 // prevents singularity
+const G = 420
+const SOFTENING = 900
 const BASE_DAMP = 0.995
 const SURFACE_DAMP = 0.92
+
+// ---- FAR CONTROL ----
+const MAX_DISTANCE = Math.max(canvas.width, canvas.height) * 0.75
+const FAR_DAMP = 0.985
 
 let balls = []
 let currentBall = null
@@ -45,7 +49,7 @@ function spawnBall() {
   nextLevel = randLevel()
 }
 
-// ====== GRAVITY (PURE, NO ZONES) ======
+// ====== PHYSICS ======
 function applyPhysics(ball) {
   const dx = CENTER.x - ball.pos.x
   const dy = CENTER.y - ball.pos.y
@@ -57,14 +61,19 @@ function applyPhysics(ball) {
 
   // ---- PURE CENTRAL FORCE ----
   const force = G / (distSq + SOFTENING)
-
   ball.vel.x += nx * force
   ball.vel.y += ny * force
 
-  // ---- SMOOTH DISTANCE-BASED DAMPING (NOT FORCE) ----
-  let damp = BASE_DAMP
+  // ---- FAR DISTANCE LEASH ----
+  if (dist > MAX_DISTANCE) {
+    ball.vel.x *= FAR_DAMP
+    ball.vel.y *= FAR_DAMP
+  }
 
+  // ---- SMOOTH SURFACE DAMPING (VELOCITY ONLY) ----
+  let damp = BASE_DAMP
   const surfaceDist = CORE_RADIUS + ball.size + 2
+
   if (dist < surfaceDist + 40) {
     const t = Math.max(0, Math.min(1, (surfaceDist + 40 - dist) / 40))
     damp = BASE_DAMP * (1 - t * (1 - SURFACE_DAMP))
@@ -77,7 +86,7 @@ function applyPhysics(ball) {
   ball.pos.x += ball.vel.x
   ball.pos.y += ball.vel.y
 
-  // ---- SOFT SURFACE CONSTRAINT ----
+  // ---- SOFT CORE CONSTRAINT ----
   if (dist < surfaceDist) {
     ball.pos.x = CENTER.x - nx * surfaceDist
     ball.pos.y = CENTER.y - ny * surfaceDist
@@ -86,7 +95,7 @@ function applyPhysics(ball) {
   }
 }
 
-// ====== COLLISIONS (CALM, NO EJECTION) ======
+// ====== COLLISIONS ======
 function resolveCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
@@ -108,13 +117,13 @@ function resolveCollisions() {
         b.pos.x += nx * overlap * 0.5
         b.pos.y += ny * overlap * 0.5
 
-        // very light impulse (no chaos)
+        // ultra-light impulse
         const dvx = b.vel.x - a.vel.x
         const dvy = b.vel.y - a.vel.y
-        a.vel.x += dvx * 0.05
-        a.vel.y += dvy * 0.05
-        b.vel.x -= dvx * 0.05
-        b.vel.y -= dvy * 0.05
+        a.vel.x += dvx * 0.04
+        a.vel.y += dvy * 0.04
+        b.vel.x -= dvx * 0.04
+        b.vel.y -= dvy * 0.04
 
         if (a.level === b.level) {
           merge(a, b)
@@ -163,7 +172,7 @@ function ballColor(lvl) {
   return c[lvl] || "#eee"
 }
 
-// ====== TRAJECTORY (IDENTICAL PHYSICS) ======
+// ====== TRAJECTORY ======
 function drawTrajectory() {
   if (!isAiming) return
 
@@ -189,7 +198,8 @@ function drawTrajectory() {
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
 
-    if (Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y) < CORE_RADIUS + currentBall.size) break
+    if (Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y) <
+        CORE_RADIUS + currentBall.size) break
   }
 }
 
