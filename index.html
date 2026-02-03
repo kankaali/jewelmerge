@@ -4,28 +4,165 @@
   <meta charset="UTF-8" />
   <meta
     name="viewport"
-    content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
   />
-  <title>Sputnika Mobile</title>
-
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #0b0f1a;
-      overflow: hidden;
-      touch-action: none;
-    }
-
-    canvas {
-      display: block;
-    }
-  </style>
+  <title>Orbital Merge</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
+  <!-- Mobile-only warning -->
+  <div id="rotate-warning">
+    Rotate to portrait mode 📱
+  </div>
 
-<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
-<script src="game.js"></script>
+  <!-- Game Wrapper -->
+  <div id="game-container">
 
+    <!-- UI Layer -->
+    <div id="ui">
+      <div id="top-left">
+        <div class="label">NEXT</div>
+        <canvas id="next-preview"></canvas>
+      </div>
+
+      <div id="top-center"></div>
+
+      <div id="right-ui">
+        <button>ℹ️</button>
+        <button>⚙️</button>
+      </div>
+
+      <div id="bottom-left">
+        Score: <span id="score">0</span>
+      </div>
+    </div>
+
+    <!-- Main Game Canvas -->
+    <canvas id="game"></canvas>
+
+  </div>
+
+  <style> /* ===== RESET ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  touch-action: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0b0f;
+  font-family: system-ui, sans-serif;
+  color: #fff;
+}
+
+/* ===== ROTATION BLOCK ===== */
+#rotate-warning {
+  position: fixed;
+  inset: 0;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  background: #000;
+  z-index: 999;
+  font-size: 1.2rem;
+}
+
+/* Show warning if landscape */
+@media (orientation: landscape) {
+  #game-container { display: none; }
+  #rotate-warning { display: flex; }
+}
+
+/* ===== GAME CONTAINER ===== */
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* ===== CANVAS ===== */
+#game {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ===== UI OVERLAY ===== */
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Top-left */
+#top-left {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  text-align: center;
+}
+
+#top-left .label {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+
+#next-preview {
+  width: 40px;
+  height: 40px;
+  background: #111;
+  border-radius: 50%;
+}
+
+/* Top-center (black hole placeholder) */
+#top-center {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #000;
+}
+
+/* Right buttons */
+#right-ui {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#right-ui button {
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #111;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+}
+
+/* Bottom-left score */
+#bottom-left {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  font-size: 14px;
+  opacity: 0.9;
+}
+</style>
+
+  <script src="game.js"></script>
 </body>
 </html>
