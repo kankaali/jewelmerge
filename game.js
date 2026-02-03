@@ -15,9 +15,8 @@ const BASE_DAMP = 0.997
 const SURFACE_DAMP = 0.94
 const LAUNCH_POWER = 0.06
 
-// hard universe rule (Sputnik style)
-const MAX_RADIUS = Math.min(canvas.width, canvas.height) * 0.55
-const RADIAL_LIMIT = 0.85   // how much outward velocity is allowed
+// much smaller invisible backside orbit (apoapsis)
+const APOAPSIS_RADIUS = CORE_RADIUS + 220
 
 // ===== GAME =====
 let balls = []
@@ -62,18 +61,23 @@ function applyPhysics(b) {
   b.vel.x += nx * f
   b.vel.y += ny * f
 
-  // ---- OUTWARD VELOCITY CLAMP ----
-  const ox = b.pos.x - CENTER.x
-  const oy = b.pos.y - CENTER.y
-  const od = Math.hypot(ox, oy)
+  // ---- APOAPSIS TURNAROUND (real orbit) ----
+  const rx = b.pos.x - CENTER.x
+  const ry = b.pos.y - CENTER.y
+  const rd = Math.hypot(rx, ry)
 
-  if (od > MAX_RADIUS) {
-    const onx = ox / od
-    const ony = oy / od
+  if (rd > APOAPSIS_RADIUS) {
+    const onx = rx / rd
+    const ony = ry / rd
+
     const vr = b.vel.x * onx + b.vel.y * ony
+
+    // outward motion dies here (micro pause)
     if (vr > 0) {
-      b.vel.x -= onx * vr * RADIAL_LIMIT
-      b.vel.y -= ony * vr * RADIAL_LIMIT
+      b.vel.x -= onx * vr
+      b.vel.y -= ony * vr
+      b.vel.x *= 0.985
+      b.vel.y *= 0.985
     }
   }
 
@@ -102,6 +106,7 @@ function applyPhysics(b) {
     b.vel.x = tx * tangential
     b.vel.y = ty * tangential
 
+    // subtle continuous rolling
     b.vel.x += tx * b.drift
     b.vel.y += ty * b.drift
 
@@ -184,7 +189,7 @@ function drawTrajectory() {
     vel = fake.vel
 
     const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
-    if (d > MAX_RADIUS * 1.02) break
+    if (d > APOAPSIS_RADIUS + 8) break
 
     ctx.fillStyle = `rgba(255,255,255,${1 - i / 180})`
     ctx.beginPath()
