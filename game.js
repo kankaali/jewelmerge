@@ -1,202 +1,135 @@
-/* ================================
-   SPUTNIKA MOBILE – STABLE BUILD
-   ================================ */
+// ====== SETUP ======
+const canvas = document.getElementById("game")
+const ctx = canvas.getContext("2d")
 
-const {
-  Engine,
-  Render,
-  World,
-  Bodies,
-  Body,
-  Events,
-  Vector
-} = Matter;
+canvas.width = innerWidth
+canvas.height = innerHeight
 
-/* ---------- Screen (Mobile Only) ---------- */
-const WIDTH = window.innerWidth;
-const HEIGHT = window.innerHeight;
+const CENTER = { x: canvas.width / 2, y: canvas.height * 0.25 }
 
-/* ---------- Engine ---------- */
-const engine = Engine.create();
-engine.gravity.y = 0;
+const CORE_RADIUS = 18
+const CAPTURE_RADIUS = 140
+const ORBIT_RADIUS = 110
+let GAMEOVER_RADIUS = 190
 
-/* ---------- Renderer ---------- */
-const render = Render.create({
-  element: document.body,
-  engine: engine,
-  options: {
-    width: WIDTH,
-    height: HEIGHT,
-    wireframes: false,
-    background: "#0b0f1a"
+const G = 0.6
+const SUN_LEVEL = 8
+
+let balls = []
+let currentBall = null
+let nextLevel = randLevel()
+
+// ====== BALL FACTORY ======
+function createBall(x, y, level, vx = 0, vy = 0) {
+  return {
+    pos: { x, y },
+    vel: { x: vx, y: vy },
+    level,
+    size: 10 + level * 4,
+    state: "free",
+    angle: 0,
+    angularSpeed: 0
   }
-});
-
-Engine.run(engine);
-Render.run(render);
-
-/* ---------- Bubble ---------- */
-const CENTER = {
-  x: WIDTH / 2,
-  y: HEIGHT * 0.6
-};
-
-const BUBBLE_RADIUS = Math.min(WIDTH, HEIGHT) * 0.4;
-
-const bubble = Bodies.circle(
-  CENTER.x,
-  CENTER.y,
-  BUBBLE_RADIUS,
-  {
-    isStatic: true,
-    render: {
-      fillStyle: "transparent",
-      strokeStyle: "#334155",
-      lineWidth: 3
-    }
-  }
-);
-
-World.add(engine.world, bubble);
-
-/* ---------- Planet Levels ---------- */
-const PLANETS = [
-  { r: 10, c: "#6ee7ff" },
-  { r: 14, c: "#60a5fa" },
-  { r: 18, c: "#818cf8" },
-  { r: 22, c: "#a78bfa" },
-  { r: 26, c: "#f472b6" },
-  { r: 30, c: "#fb7185" },
-  { r: 36, c: "#fbbf24" },
-  { r: 44, c: "#f59e0b" },
-  { r: 52, c: "#ef4444" },
-  { r: 60, c: "#fde047" }
-];
-
-/* ---------- Create Planet ---------- */
-function createPlanet(level, x, y) {
-  const scale = BUBBLE_RADIUS / 180;
-  return Bodies.circle(x, y, PLANETS[level].r * scale, {
-    label: "planet",
-    planetLevel: level,
-    restitution: 0.6,
-    friction: 0.1,
-    density: 0.0015 * (level + 1),
-    render: {
-      fillStyle: PLANETS[level].c
-    }
-  });
 }
 
-/* ---------- Spawn ---------- */
-let heldPlanet = null;
+// ====== UPDATE LOOP ======
+function update() {
+  for (let ball of balls) {
 
-function spawnPlanet() {
-  heldPlanet = createPlanet(
-    0,
-    CENTER.x,
-    CENTER.y - BUBBLE_RADIUS - 40
-  );
-  Body.setStatic(heldPlanet, true);
-  World.add(engine.world, heldPlanet);
-}
-
-spawnPlanet();
-
-/* ---------- Touch Launch ---------- */
-render.canvas.addEventListener("touchstart", e => {
-  if (!heldPlanet) return;
-
-  const t = e.touches[0];
-  const rect = render.canvas.getBoundingClientRect();
-
-  const target = {
-    x: t.clientX - rect.left,
-    y: t.clientY - rect.top
-  };
-
-  const dir = Vector.normalise(
-    Vector.sub(heldPlanet.position, target)
-  );
-
-  Body.setStatic(heldPlanet, false);
-  Body.applyForce(
-    heldPlanet,
-    heldPlanet.position,
-    Vector.mult(dir, 0.035)
-  );
-
-  heldPlanet = null;
-  setTimeout(spawnPlanet, 700);
-});
-
-/* ---------- Merge ---------- */
-Events.on(engine, "collisionStart", event => {
-  event.pairs.forEach(pair => {
-    const a = pair.bodyA;
-    const b = pair.bodyB;
-
-    if (
-      a.label === "planet" &&
-      b.label === "planet" &&
-      a.planetLevel === b.planetLevel &&
-      a.planetLevel < PLANETS.length - 1
-    ) {
-      const level = a.planetLevel + 1;
-      const pos = Vector.div(
-        Vector.add(a.position, b.position),
-        2
-      );
-
-      World.remove(engine.world, a);
-      World.remove(engine.world, b);
-      World.add(engine.world, createPlanet(level, pos.x, pos.y));
+    if (ball.state === "free") {
+      applyGravity(ball)
     }
-  });
-});
 
-/* ---------- Gravity ---------- */
-Events.on(engine, "beforeUpdate", () => {
-  const planets = engine.world.bodies.filter(b => b.label === "planet");
-
-  for (let i = 0; i < planets.length; i++) {
-    for (let j = i + 1; j < planets.length; j++) {
-      const a = planets[i];
-      const b = planets[j];
-
-      const dir = Vector.sub(b.position, a.position);
-      const force = Vector.mult(
-        Vector.normalise(dir),
-        0.0000008 * a.mass * b.mass
-      );
-
-      Body.applyForce(a, a.position, force);
-      Body.applyForce(b, b.position, Vector.neg(force));
+    if (ball.state === "orbiting") {
+      orbit(ball)
     }
   }
-});
 
-/* ---------- Game Over ---------- */
-const timers = new Map();
+  checkCollisions()
+}
 
-Events.on(engine, "afterUpdate", () => {
-  engine.world.bodies.forEach(b => {
-    if (b.label !== "planet" || b.isStatic) return;
+// ====== GRAVITY ======
+function applyGravity(ball) {
+  const dx = CENTER.x - ball.pos.x
+  const dy = CENTER.y - ball.pos.y
+  const dist = Math.hypot(dx, dy)
 
-    const dist = Vector.magnitude(
-      Vector.sub(b.position, CENTER)
-    );
+  if (dist < CAPTURE_RADIUS) {
+    capture(ball)
+    return
+  }
 
-    const limit = BUBBLE_RADIUS - b.circleRadius;
+  const nx = dx / dist
+  const ny = dy / dist
 
-    if (dist > limit) {
-      timers.set(b, (timers.get(b) || 0) + 1);
-      if (timers.get(b) > 60) {
-        alert("Game Over");
-        location.reload();
+  ball.vel.x += nx * G
+  ball.vel.y += ny * G
+
+  ball.pos.x += ball.vel.x
+  ball.pos.y += ball.vel.y
+}
+
+// ====== CAPTURE ======
+function capture(ball) {
+  ball.state = "orbiting"
+  ball.angle = Math.atan2(
+    ball.pos.y - CENTER.y,
+    ball.pos.x - CENTER.x
+  )
+  ball.radius = ORBIT_RADIUS
+  ball.angularSpeed = clamp(
+    (ball.vel.x + ball.vel.y) * 0.01,
+    -0.03,
+     0.03
+  )
+}
+
+// ====== ORBIT ======
+function orbit(ball) {
+  ball.angle += ball.angularSpeed
+  ball.pos.x = CENTER.x + Math.cos(ball.angle) * ball.radius
+  ball.pos.y = CENTER.y + Math.sin(ball.angle) * ball.radius
+}
+
+// ====== COLLISIONS ======
+function checkCollisions() {
+  for (let i = 0; i < balls.length; i++) {
+    for (let j = i + 1; j < balls.length; j++) {
+      const a = balls[i]
+      const b = balls[j]
+
+      if (a.state !== "orbiting" || b.state !== "orbiting") continue
+
+      const d = Math.hypot(
+        a.pos.x - b.pos.x,
+        a.pos.y - b.pos.y
+      )
+
+      if (d < a.size + b.size && a.level === b.level) {
+        merge(a, b)
+        return
       }
-    } else {
-      timers.delete(b);
     }
-  });
-});
+  }
+}
+
+// ====== MERGE ======
+function merge(a, b) {
+  balls = balls.filter(x => x !== a && x !== b)
+  balls.push(
+    createBall(
+      (a.pos.x + b.pos.x) / 2,
+      (a.pos.y + b.pos.y) / 2,
+      a.level + 1
+    )
+  )
+}
+
+// ====== UTILS ======
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v))
+}
+
+function randLevel() {
+  return Math.floor(Math.random() * 3)
+}
