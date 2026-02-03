@@ -1,17 +1,20 @@
-/* ===============================
-   SPUTNIKA STYLE MERGE GAME
-   FULLY RESPONSIVE – STABLE
-   =============================== */
+/* ================================
+   SPUTNIKA MOBILE – STABLE BUILD
+   ================================ */
 
 const {
-  Engine, Render, World, Bodies, Body, Events, Vector
+  Engine,
+  Render,
+  World,
+  Bodies,
+  Body,
+  Events,
+  Vector
 } = Matter;
 
-/* ---------- Screen Size ---------- */
-const SCREEN = {
-  w: Math.min(window.innerWidth, 480),
-  h: window.innerHeight
-};
+/* ---------- Screen (Mobile Only) ---------- */
+const WIDTH = window.innerWidth;
+const HEIGHT = window.innerHeight;
 
 /* ---------- Engine ---------- */
 const engine = Engine.create();
@@ -20,28 +23,26 @@ engine.gravity.y = 0;
 /* ---------- Renderer ---------- */
 const render = Render.create({
   element: document.body,
-  engine,
+  engine: engine,
   options: {
-    width: SCREEN.w,
-    height: SCREEN.h,
+    width: WIDTH,
+    height: HEIGHT,
     wireframes: false,
-    background: "#0b0f1a",
-    pixelRatio: window.devicePixelRatio
+    background: "#0b0f1a"
   }
 });
 
 Engine.run(engine);
 Render.run(render);
 
-/* ---------- Play Area ---------- */
+/* ---------- Bubble ---------- */
 const CENTER = {
-  x: SCREEN.w / 2,
-  y: SCREEN.h * 0.6
+  x: WIDTH / 2,
+  y: HEIGHT * 0.6
 };
 
-const BUBBLE_RADIUS = Math.min(SCREEN.w, SCREEN.h) * 0.42;
+const BUBBLE_RADIUS = Math.min(WIDTH, HEIGHT) * 0.4;
 
-/* ---------- Bubble Wall ---------- */
 const bubble = Bodies.circle(
   CENTER.x,
   CENTER.y,
@@ -58,7 +59,7 @@ const bubble = Bodies.circle(
 
 World.add(engine.world, bubble);
 
-/* ---------- Planet Data ---------- */
+/* ---------- Planet Levels ---------- */
 const PLANETS = [
   { r: 10, c: "#6ee7ff" },
   { r: 14, c: "#60a5fa" },
@@ -69,7 +70,7 @@ const PLANETS = [
   { r: 36, c: "#fbbf24" },
   { r: 44, c: "#f59e0b" },
   { r: 52, c: "#ef4444" },
-  { r: 60, c: "#fde047" } // Sun
+  { r: 60, c: "#fde047" }
 ];
 
 /* ---------- Create Planet ---------- */
@@ -81,18 +82,20 @@ function createPlanet(level, x, y) {
     restitution: 0.6,
     friction: 0.1,
     density: 0.0015 * (level + 1),
-    render: { fillStyle: PLANETS[level].c }
+    render: {
+      fillStyle: PLANETS[level].c
+    }
   });
 }
 
-/* ---------- Spawning ---------- */
+/* ---------- Spawn ---------- */
 let heldPlanet = null;
 
 function spawnPlanet() {
   heldPlanet = createPlanet(
     0,
     CENTER.x,
-    CENTER.y - BUBBLE_RADIUS - 30
+    CENTER.y - BUBBLE_RADIUS - 40
   );
   Body.setStatic(heldPlanet, true);
   World.add(engine.world, heldPlanet);
@@ -100,12 +103,20 @@ function spawnPlanet() {
 
 spawnPlanet();
 
-/* ---------- Input ---------- */
-function launch(x, y) {
+/* ---------- Touch Launch ---------- */
+render.canvas.addEventListener("touchstart", e => {
   if (!heldPlanet) return;
 
+  const t = e.touches[0];
+  const rect = render.canvas.getBoundingClientRect();
+
+  const target = {
+    x: t.clientX - rect.left,
+    y: t.clientY - rect.top
+  };
+
   const dir = Vector.normalise(
-    Vector.sub(heldPlanet.position, { x, y })
+    Vector.sub(heldPlanet.position, target)
   );
 
   Body.setStatic(heldPlanet, false);
@@ -117,21 +128,11 @@ function launch(x, y) {
 
   heldPlanet = null;
   setTimeout(spawnPlanet, 700);
-}
-
-render.canvas.addEventListener("mousedown", e => {
-  launch(e.offsetX, e.offsetY);
 });
 
-render.canvas.addEventListener("touchstart", e => {
-  const t = e.touches[0];
-  const r = render.canvas.getBoundingClientRect();
-  launch(t.clientX - r.left, t.clientY - r.top);
-});
-
-/* ---------- Merge Logic ---------- */
-Events.on(engine, "collisionStart", e => {
-  e.pairs.forEach(pair => {
+/* ---------- Merge ---------- */
+Events.on(engine, "collisionStart", event => {
+  event.pairs.forEach(pair => {
     const a = pair.bodyA;
     const b = pair.bodyB;
 
@@ -154,7 +155,7 @@ Events.on(engine, "collisionStart", e => {
   });
 });
 
-/* ---------- Cosmic Gravity ---------- */
+/* ---------- Gravity ---------- */
 Events.on(engine, "beforeUpdate", () => {
   const planets = engine.world.bodies.filter(b => b.label === "planet");
 
@@ -164,23 +165,23 @@ Events.on(engine, "beforeUpdate", () => {
       const b = planets[j];
 
       const dir = Vector.sub(b.position, a.position);
-      const dist = Vector.magnitude(dir) || 1;
-      const strength = 0.0000008 * a.mass * b.mass;
+      const force = Vector.mult(
+        Vector.normalise(dir),
+        0.0000008 * a.mass * b.mass
+      );
 
-      const force = Vector.mult(Vector.normalise(dir), strength);
       Body.applyForce(a, a.position, force);
       Body.applyForce(b, b.position, Vector.neg(force));
     }
   }
 });
 
-/* ---------- Game Over (CORRECT & STABLE) ---------- */
-const escapeTimers = new Map();
+/* ---------- Game Over ---------- */
+const timers = new Map();
 
 Events.on(engine, "afterUpdate", () => {
   engine.world.bodies.forEach(b => {
-    if (b.label !== "planet") return;
-    if (b.isStatic) return;
+    if (b.label !== "planet" || b.isStatic) return;
 
     const dist = Vector.magnitude(
       Vector.sub(b.position, CENTER)
@@ -189,14 +190,13 @@ Events.on(engine, "afterUpdate", () => {
     const limit = BUBBLE_RADIUS - b.circleRadius;
 
     if (dist > limit) {
-      escapeTimers.set(b, (escapeTimers.get(b) || 0) + 1);
-
-      if (escapeTimers.get(b) > 60) {
+      timers.set(b, (timers.get(b) || 0) + 1);
+      if (timers.get(b) > 60) {
         alert("Game Over");
         location.reload();
       }
     } else {
-      escapeTimers.delete(b);
+      timers.delete(b);
     }
   });
 });
