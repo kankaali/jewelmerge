@@ -19,6 +19,10 @@ let balls = []
 let currentBall = null
 let nextLevel = randLevel()
 
+let isAiming = false
+let aimStart = null
+let aimCurrent = null
+
 // ====== BALL FACTORY ======
 function createBall(x, y, level, vx = 0, vy = 0) {
   return {
@@ -28,23 +32,27 @@ function createBall(x, y, level, vx = 0, vy = 0) {
     size: 10 + level * 4,
     state: "free",
     angle: 0,
-    angularSpeed: 0
+    angularSpeed: 0,
+    radius: 0
   }
+}
+
+// ====== SPAWN ======
+function spawnCurrentBall() {
+  currentBall = createBall(
+    canvas.width / 2,
+    canvas.height - 80,
+    nextLevel
+  )
+  nextLevel = randLevel()
 }
 
 // ====== UPDATE LOOP ======
 function update() {
   for (let ball of balls) {
-
-    if (ball.state === "free") {
-      applyGravity(ball)
-    }
-
-    if (ball.state === "orbiting") {
-      orbit(ball)
-    }
+    if (ball.state === "free") applyGravity(ball)
+    if (ball.state === "orbiting") orbit(ball)
   }
-
   checkCollisions()
 }
 
@@ -125,7 +133,127 @@ function merge(a, b) {
   )
 }
 
+// ====== DRAW ======
+function drawCore() {
+  ctx.strokeStyle = "rgba(255,255,255,0.1)"
+  ctx.beginPath()
+  ctx.arc(CENTER.x, CENTER.y, CAPTURE_RADIUS, 0, Math.PI * 2)
+  ctx.stroke()
 
+  ctx.strokeStyle = "rgba(255,255,255,0.2)"
+  ctx.beginPath()
+  ctx.arc(CENTER.x, CENTER.y, ORBIT_RADIUS, 0, Math.PI * 2)
+  ctx.stroke()
+
+  ctx.fillStyle = "#000"
+  ctx.beginPath()
+  ctx.arc(CENTER.x, CENTER.y, CORE_RADIUS, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function drawBall(ball) {
+  ctx.fillStyle = ballColor(ball.level)
+  ctx.beginPath()
+  ctx.arc(ball.pos.x, ball.pos.y, ball.size, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function ballColor(level) {
+  const colors = [
+    "#4dd0e1",
+    "#81c784",
+    "#ffd54f",
+    "#ff8a65",
+    "#ba68c8",
+    "#f06292",
+    "#90a4ae",
+    "#ff5252",
+    "#fff176"
+  ]
+  return colors[level] || "#fff"
+}
+
+// ====== AIMING LINE ======
+function drawAimingLine() {
+  if (!isAiming) return
+
+  let simPos = { x: currentBall.pos.x, y: currentBall.pos.y }
+  let simVel = {
+    x: (aimStart.x - aimCurrent.x) * 0.08,
+    y: (aimStart.y - aimCurrent.y) * 0.08
+  }
+
+  ctx.strokeStyle = "rgba(255,255,255,0.4)"
+  ctx.beginPath()
+  ctx.moveTo(simPos.x, simPos.y)
+
+  for (let i = 0; i < 30; i++) {
+    const dx = CENTER.x - simPos.x
+    const dy = CENTER.y - simPos.y
+    const dist = Math.hypot(dx, dy)
+    if (dist < CAPTURE_RADIUS) break
+
+    const nx = dx / dist
+    const ny = dy / dist
+
+    simVel.x += nx * G
+    simVel.y += ny * G
+
+    simPos.x += simVel.x
+    simPos.y += simVel.y
+    ctx.lineTo(simPos.x, simPos.y)
+  }
+
+  ctx.stroke()
+}
+
+// ====== TOUCH INPUT ======
+canvas.addEventListener("touchstart", e => {
+  const t = e.touches[0]
+  isAiming = true
+  aimStart = { x: t.clientX, y: t.clientY }
+  aimCurrent = aimStart
+})
+
+canvas.addEventListener("touchmove", e => {
+  if (!isAiming) return
+  const t = e.touches[0]
+  aimCurrent = { x: t.clientX, y: t.clientY }
+})
+
+canvas.addEventListener("touchend", () => {
+  if (!isAiming) return
+  shootBall()
+  isAiming = false
+})
+
+// ====== SHOOT ======
+function shootBall() {
+  const dx = aimStart.x - aimCurrent.x
+  const dy = aimStart.y - aimCurrent.y
+
+  currentBall.vel.x = dx * 0.08
+  currentBall.vel.y = dy * 0.08
+  currentBall.state = "free"
+
+  balls.push(currentBall)
+  spawnCurrentBall()
+}
+
+// ====== LOOP ======
+function loop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+  drawCore()
+
+  for (let ball of balls) drawBall(ball)
+  if (currentBall) drawBall(currentBall)
+
+  drawAimingLine()
+  update()
+
+  requestAnimationFrame(loop)
+}
 
 // ====== UTILS ======
 function clamp(v, min, max) {
@@ -135,3 +263,7 @@ function clamp(v, min, max) {
 function randLevel() {
   return Math.floor(Math.random() * 3)
 }
+
+// ====== START ======
+spawnCurrentBall()
+loop()
