@@ -8,8 +8,11 @@ canvas.height = innerHeight
 const CENTER = { x: canvas.width / 2, y: canvas.height * 0.25 }
 
 const CORE_RADIUS = 18
-const G = 0.5
-const DAMPING = 0.99
+const CORE_LOCK_RADIUS = 70   // strong influence zone
+const G = 0.45
+const DAMPING = 0.985
+const CORE_DAMPING = 0.6      // heavy damping near core
+const COLLISION_PUSH = 0.003  // VERY soft
 
 let balls = []
 let currentBall = null
@@ -27,7 +30,7 @@ function createBall(x, y, level, vx = 0, vy = 0) {
     vel: { x: vx, y: vy },
     level,
     size,
-    mass: size * size // important
+    mass: size * size
   }
 }
 
@@ -41,34 +44,44 @@ function spawnCurrentBall() {
   nextLevel = randLevel()
 }
 
-// ====== GRAVITY (ALWAYS ON) ======
+// ====== GRAVITY ======
 function applyGravity(ball) {
   const dx = CENTER.x - ball.pos.x
   const dy = CENTER.y - ball.pos.y
   const dist = Math.hypot(dx, dy)
 
-  if (dist < CORE_RADIUS + ball.size) {
-    const nx = dx / dist
-    const ny = dy / dist
-    ball.pos.x = CENTER.x - nx * (CORE_RADIUS + ball.size)
-    ball.pos.y = CENTER.y - ny * (CORE_RADIUS + ball.size)
-    return
-  }
-
   const nx = dx / dist
   const ny = dy / dist
 
+  // core surface lock
+  if (dist < CORE_RADIUS + ball.size) {
+    ball.pos.x = CENTER.x - nx * (CORE_RADIUS + ball.size)
+    ball.pos.y = CENTER.y - ny * (CORE_RADIUS + ball.size)
+
+    // kill most motion
+    ball.vel.x *= 0.15
+    ball.vel.y *= 0.15
+    return
+  }
+
+  // gravity always applies
   ball.vel.x += nx * G
   ball.vel.y += ny * G
 
-  ball.vel.x *= DAMPING
-  ball.vel.y *= DAMPING
+  // strong damping near core
+  if (dist < CORE_LOCK_RADIUS) {
+    ball.vel.x *= CORE_DAMPING
+    ball.vel.y *= CORE_DAMPING
+  } else {
+    ball.vel.x *= DAMPING
+    ball.vel.y *= DAMPING
+  }
 
   ball.pos.x += ball.vel.x
   ball.pos.y += ball.vel.y
 }
 
-// ====== RIGID COLLISIONS (NO GAPS) ======
+// ====== COLLISIONS ======
 function resolveCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
@@ -94,13 +107,14 @@ function resolveCollisions() {
         b.pos.x += nx * overlap * rb
         b.pos.y += ny * overlap * rb
 
-        // impulse transfer (natural nudging)
+        // MICRO impulse only
         const tx = b.vel.x - a.vel.x
         const ty = b.vel.y - a.vel.y
-        a.vel.x += tx * 0.02
-        a.vel.y += ty * 0.02
-        b.vel.x -= tx * 0.02
-        b.vel.y -= ty * 0.02
+
+        a.vel.x += tx * COLLISION_PUSH
+        a.vel.y += ty * COLLISION_PUSH
+        b.vel.x -= tx * COLLISION_PUSH
+        b.vel.y -= ty * COLLISION_PUSH
 
         // merge
         if (a.level === b.level) {
@@ -160,7 +174,7 @@ function ballColor(level) {
   return colors[level] || "#fff"
 }
 
-// ====== TRAJECTORY (TO BLACK HOLE) ======
+// ====== TRAJECTORY ======
 function drawAimingLine() {
   if (!isAiming) return
 
@@ -170,7 +184,7 @@ function drawAimingLine() {
     y: (aimStart.y - aimCurrent.y) * 0.05
   }
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 55; i++) {
     const dx = CENTER.x - pos.x
     const dy = CENTER.y - pos.y
     const dist = Math.hypot(dx, dy)
@@ -188,7 +202,7 @@ function drawAimingLine() {
     pos.x += vel.x
     pos.y += vel.y
 
-    ctx.fillStyle = `rgba(255,255,255,${1 - i / 50})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 55})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
