@@ -188,23 +188,32 @@ Events.on(engine, "beforeUpdate", () => {
   }
 });
 
-/* ---------- Game Over Logic ---------- */
-const outside = new Map();
+/* ---------- Game Over Logic (FIXED) ---------- */
+const outsideTimers = new Map();
 
 Events.on(engine, "afterUpdate", () => {
   engine.world.bodies.forEach(b => {
     if (b.label !== "planet") return;
+    if (b.isStatic) return; // IMPORTANT: ignore held planet
 
-    const dist = Vector.magnitude(Vector.sub(b.position, CENTER));
+    const planetRadius = b.circleRadius;
+    const distFromCenter = Vector.magnitude(
+      Vector.sub(b.position, CENTER)
+    );
 
-    if (dist > BUBBLE_RADIUS) {
-      outside.set(b, (outside.get(b) || 0) + 1);
-      if (outside.get(b) > 60) {
+    const allowedDistance = BUBBLE_RADIUS - planetRadius;
+
+    if (distFromCenter > allowedDistance) {
+      outsideTimers.set(b, (outsideTimers.get(b) || 0) + 1);
+
+      // ~60 frames ≈ 1 second
+      if (outsideTimers.get(b) > 60) {
         alert("Game Over");
         location.reload();
       }
     } else {
-      outside.delete(b);
+      outsideTimers.delete(b);
     }
   });
 });
+
