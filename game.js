@@ -4,21 +4,24 @@ const ctx = canvas.getContext("2d")
 canvas.width = innerWidth
 canvas.height = innerHeight
 
-// ===== CORE =====
+// ================= CORE =================
 const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
-const CORE_RADIUS = 24
+const CORE_RADIUS = 26
 
-// ===== PHYSICS =====
-const G = 820
-const SOFTEN = 1400
-const BASE_DAMP = 0.997
-const SURFACE_DAMP = 0.94
+// ================= PHYSICS =================
+const G = 920
+const SOFTEN = 1600
+
+const BASE_DAMP = 0.9975
+const SURFACE_DAMP = 0.945
 const LAUNCH_POWER = 0.06
 
-// much smaller invisible backside orbit (apoapsis)
-const APOAPSIS_RADIUS = CORE_RADIUS + 220
+// ---- CLOSED GRAVITY BOWL ----
+const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.42
+const BOWL_SOFT_EDGE = 0.92        // where slowdown begins
+const BOWL_PUSH = 0.55             // inward correction strength
 
-// ===== GAME =====
+// ================= GAME =================
 let balls = []
 let currentBall = null
 let nextLevel = randLevel()
@@ -27,7 +30,7 @@ let aiming = false
 let aimStart = null
 let aimNow = null
 
-// ===== BALL =====
+// ================= BALL =================
 function createBall(x, y, lvl, vx = 0, vy = 0) {
   const r = 22 + lvl * 6
   return {
@@ -36,17 +39,21 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
     r,
     lvl,
     surface: false,
-    drift: (Math.random() - 0.5) * 0.00035
+    drift: (Math.random() - 0.5) * 0.0003
   }
 }
 
-// ===== SPAWN =====
+// ================= SPAWN =================
 function spawn() {
-  currentBall = createBall(canvas.width / 2, canvas.height - 90, nextLevel)
+  currentBall = createBall(
+    canvas.width / 2,
+    canvas.height - 90,
+    nextLevel
+  )
   nextLevel = randLevel()
 }
 
-// ===== PHYSICS =====
+// ================= PHYSICS =================
 function applyPhysics(b) {
   const dx = CENTER.x - b.pos.x
   const dy = CENTER.y - b.pos.y
@@ -56,39 +63,37 @@ function applyPhysics(b) {
   const nx = dx / d
   const ny = dy / d
 
-  // ---- GRAVITY ----
+  // ---- GRAVITY (PURE) ----
   const f = G / (d2 + SOFTEN)
   b.vel.x += nx * f
   b.vel.y += ny * f
 
-  // ---- APOAPSIS TURNAROUND (real orbit) ----
-  const rx = b.pos.x - CENTER.x
-  const ry = b.pos.y - CENTER.y
-  const rd = Math.hypot(rx, ry)
+  // ---- CLOSED BOWL (APOAPSIS TURNAROUND) ----
+  const ox = b.pos.x - CENTER.x
+  const oy = b.pos.y - CENTER.y
+  const od = Math.hypot(ox, oy)
 
-  if (rd > APOAPSIS_RADIUS) {
-    const onx = rx / rd
-    const ony = ry / rd
+  if (od > BOWL_RADIUS * BOWL_SOFT_EDGE) {
+    const t = Math.min(1, (od - BOWL_RADIUS * BOWL_SOFT_EDGE) / (BOWL_RADIUS * 0.08))
+    const onx = ox / od
+    const ony = oy / od
 
+    // suppress outward velocity smoothly
     const vr = b.vel.x * onx + b.vel.y * ony
-
-    // outward motion dies here (micro pause)
     if (vr > 0) {
-      b.vel.x -= onx * vr
-      b.vel.y -= ony * vr
-      b.vel.x *= 0.985
-      b.vel.y *= 0.985
+      b.vel.x -= onx * vr * t * BOWL_PUSH
+      b.vel.y -= ony * vr * t * BOWL_PUSH
     }
   }
 
-  // ---- DAMP ----
+  // ---- DAMPING ----
   b.vel.x *= BASE_DAMP
   b.vel.y *= BASE_DAMP
 
+  // ---- BLACK HOLE SURFACE ----
   const surfaceDist = CORE_RADIUS + b.r
 
-  // ---- SURFACE BEHAVIOR ----
-  if (d < surfaceDist + 14) {
+  if (d < surfaceDist + 16) {
     const vx = b.vel.x
     const vy = b.vel.y
 
@@ -97,6 +102,7 @@ function applyPhysics(b) {
     const ty = nx
     let tangential = vx * tx + vy * ty
 
+    // kill inward penetration only
     if (radial < 0) {
       b.vel.x -= nx * radial
       b.vel.y -= ny * radial
@@ -106,7 +112,7 @@ function applyPhysics(b) {
     b.vel.x = tx * tangential
     b.vel.y = ty * tangential
 
-    // subtle continuous rolling
+    // micro rolling
     b.vel.x += tx * b.drift
     b.vel.y += ty * b.drift
 
@@ -122,7 +128,7 @@ function applyPhysics(b) {
   b.pos.y += b.vel.y
 }
 
-// ===== COLLISIONS =====
+// ================= COLLISIONS =================
 function resolveCollisions() {
   for (let i = 0; i < balls.length; i++) {
     for (let j = i + 1; j < balls.length; j++) {
@@ -162,7 +168,7 @@ function resolveCollisions() {
   }
 }
 
-// ===== MERGE =====
+// ================= MERGE =================
 function merge(a, b) {
   balls = balls.filter(x => x !== a && x !== b)
   balls.push(createBall(
@@ -172,7 +178,7 @@ function merge(a, b) {
   ))
 }
 
-// ===== TRAJECTORY =====
+// ================= TRAJECTORY =================
 function drawTrajectory() {
   if (!aiming) return
 
@@ -189,7 +195,7 @@ function drawTrajectory() {
     vel = fake.vel
 
     const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
-    if (d > APOAPSIS_RADIUS + 8) break
+    if (d > BOWL_RADIUS * 1.01) break
 
     ctx.fillStyle = `rgba(255,255,255,${1 - i / 180})`
     ctx.beginPath()
@@ -200,7 +206,7 @@ function drawTrajectory() {
   }
 }
 
-// ===== DRAW =====
+// ================= DRAW =================
 function drawBall(b) {
   ctx.fillStyle = color(b.lvl)
   ctx.beginPath()
@@ -219,7 +225,7 @@ function color(l) {
   return ["#4dd0e1","#81c784","#ffd54f","#ff8a65","#ba68c8","#f06292"][l] || "#eee"
 }
 
-// ===== LOOP =====
+// ================= LOOP =================
 function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -234,7 +240,7 @@ function loop() {
   requestAnimationFrame(loop)
 }
 
-// ===== INPUT =====
+// ================= INPUT =================
 canvas.addEventListener("touchstart", e => {
   aiming = true
   const t = e.touches[0]
@@ -257,11 +263,11 @@ canvas.addEventListener("touchend", () => {
   aiming = false
 })
 
-// ===== UTIL =====
+// ================= UTIL =================
 function randLevel() {
   return Math.floor(Math.random() * 3)
 }
 
-// ===== START =====
+// ================= START =================
 spawn()
 loop()
