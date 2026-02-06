@@ -9,21 +9,17 @@ const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
 const CORE_RADIUS = 26
 
 // ================= PHYSICS =================
-const G = 0.42                     // inward gravity
-const SOFTEN = 1200
+const G = 920
+const SOFTEN = 1600
 
-// angular momentum barrier (THE missing piece)
-const L_BARRIER = 2200             // controls apoapsis bowl
-const BASE_DAMP = 0.998
+const BASE_DAMP = 0.9975
 const SURFACE_DAMP = 0.945
+const LAUNCH_POWER = 0.06
 
-// critical damping shell
-const CRIT_RADIUS = CORE_RADIUS + 34
-const CRIT_WIDTH = 22
-
-// ================= LAUNCH =================
-const LAUNCH_SCALE = 0.045
-const MAX_LAUNCH_IMPULSE = 7.5     // impulse, not speed
+// ---- CIRCULAR CLOSED BOWL (RADIAL) ----
+const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.42
+const BOWL_SOFT_START = 0.9           // % of radius where force begins
+const BOWL_FORCE = 0.45               // inward radial strength
 
 // ================= GAME =================
 let balls = []
@@ -43,7 +39,7 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
     r,
     lvl,
     surface: false,
-    drift: (Math.random() - 0.5) * 0.00035
+    drift: (Math.random() - 0.5) * 0.0003
   }
 }
 
@@ -51,7 +47,7 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
 function spawn() {
   currentBall = createBall(
     canvas.width / 2,
-    canvas.height - 82,
+    canvas.height - 90,
     nextLevel
   )
   nextLevel = randLevel()
@@ -59,66 +55,74 @@ function spawn() {
 
 // ================= PHYSICS =================
 function applyPhysics(b) {
-  const rx = b.pos.x - CENTER.x
-  const ry = b.pos.y - CENTER.y
-  const r2 = rx * rx + ry * ry + 0.0001
-  const r = Math.sqrt(r2)
+  const dx = CENTER.x - b.pos.x
+  const dy = CENTER.y - b.pos.y
+  const d2 = dx * dx + dy * dy
+  const d = Math.sqrt(d2) + 0.00001
 
-  const nx = rx / r
-  const ny = ry / r
+  const nx = dx / d
+  const ny = dy / d
 
-  // ---------------- RADIAL VELOCITIES ----------------
-  const vr = b.vel.x * nx + b.vel.y * ny
-  const tx = -ny
-  const ty = nx
-  const vt = b.vel.x * tx + b.vel.y * ty
+  // ---- PURE GRAVITY ----
+  const f = G / (d2 + SOFTEN)
+  b.vel.x += nx * f
+  b.vel.y += ny * f
 
-  // ---------------- PURE GRAVITY ----------------
-  const g = -G / (r2 + SOFTEN)
+  // ---- CIRCULAR BOWL (RADIAL TURNAROUND) ----
+  const distFromCenter = d
+  const bowlStart = BOWL_RADIUS * BOWL_SOFT_START
 
-  // ---------------- ANGULAR MOMENTUM BARRIER ----------------
-  // V_eff = L² / r³   (THIS creates the apoapsis bowl)
-  const barrier = (vt * vt) * L_BARRIER / (r2 * r)
+  if (distFromCenter > bowlStart) {
+    const t = Math.min(
+      1,
+      (distFromCenter - bowlStart) / (BOWL_RADIUS - bowlStart)
+    )
 
-  // total radial acceleration
-  const ar = g + barrier
+    // purely radial inward force
+    b.vel.x += nx * t * BOWL_FORCE
+    b.vel.y += ny * t * BOWL_FORCE
 
-  // integrate radial + tangential separately
-  let newVr = vr + ar
-  let newVt = vt * BASE_DAMP
-
-  // ---------------- CRITICAL DAMPING SHELL ----------------
-  if (r < CRIT_RADIUS + CRIT_WIDTH) {
-    const t = Math.min(1, (CRIT_RADIUS + CRIT_WIDTH - r) / CRIT_WIDTH)
-    newVr *= (1 - 0.92 * t)        // micro pause
-    newVt *= (1 - 0.25 * t)
+    // suppress outward velocity smoothly
+    const vr = b.vel.x * nx + b.vel.y * ny
+    if (vr < 0) {
+      b.vel.x -= nx * vr * t
+      b.vel.y -= ny * vr * t
+    }
   }
 
-  // reconstruct velocity
-  b.vel.x = nx * newVr + tx * newVt
-  b.vel.y = ny * newVr + ty * newVt
+  // ---- DAMPING ----
+  b.vel.x *= BASE_DAMP
+  b.vel.y *= BASE_DAMP
 
-  // ---------------- BLACK HOLE SURFACE ----------------
+  // ---- BLACK HOLE SURFACE ----
   const surfaceDist = CORE_RADIUS + b.r
-  if (r < surfaceDist) {
+  if (d < surfaceDist + 16) {
+    const vx = b.vel.x
+    const vy = b.vel.y
+
+    const radial = vx * nx + vy * ny
+    const tx = -ny
+    const ty = nx
+    let tangential = vx * tx + vy * ty
+
+    // prevent inward penetration
+    if (radial < 0) {
+      b.vel.x -= nx * radial
+      b.vel.y -= ny * radial
+    }
+
+    tangential *= SURFACE_DAMP
+
+    b.vel.x = tx * tangential + tx * b.drift
+    b.vel.y = ty * tangential + ty * b.drift
+
     b.surface = true
-
-    // remove inward penetration
-    if (newVr < 0) newVr = 0
-
-    newVt *= SURFACE_DAMP
-    newVt += b.drift
-
-    b.vel.x = tx * newVt
-    b.vel.y = ty * newVt
-
-    b.pos.x = CENTER.x + nx * surfaceDist
-    b.pos.y = CENTER.y + ny * surfaceDist
+    b.pos.x = CENTER.x - nx * surfaceDist
+    b.pos.y = CENTER.y - ny * surfaceDist
   } else {
     b.surface = false
   }
 
-  // integrate position
   b.pos.x += b.vel.x
   b.pos.y += b.vel.y
 }
@@ -145,6 +149,15 @@ function resolveCollisions() {
         b.pos.x += nx * overlap * 0.5
         b.pos.y += ny * overlap * 0.5
 
+        if (a.surface || b.surface) {
+          const tx = -ny
+          const ty = nx
+          a.vel.x += tx * 0.012
+          a.vel.y += ty * 0.012
+          b.vel.x -= tx * 0.012
+          b.vel.y -= ty * 0.012
+        }
+
         if (a.lvl === b.lvl) {
           merge(a, b)
           return
@@ -169,24 +182,17 @@ function drawTrajectory() {
   if (!aiming) return
 
   let pos = { ...currentBall.pos }
-
-  let ix = (aimStart.x - aimNow.x) * LAUNCH_SCALE
-  let iy = (aimStart.y - aimNow.y) * LAUNCH_SCALE
-  const mag = Math.hypot(ix, iy)
-  if (mag > MAX_LAUNCH_IMPULSE) {
-    ix *= MAX_LAUNCH_IMPULSE / mag
-    iy *= MAX_LAUNCH_IMPULSE / mag
+  let vel = {
+    x: (aimStart.x - aimNow.x) * LAUNCH_POWER,
+    y: (aimStart.y - aimNow.y) * LAUNCH_POWER
   }
-
-  let vel = { x: ix, y: iy }
 
   for (let i = 0; i < 180; i++) {
     const fake = {
       pos: { ...pos },
       vel: { ...vel },
       r: currentBall.r,
-      drift: 0,
-      surface: false
+      drift: 0
     }
 
     applyPhysics(fake)
@@ -254,16 +260,8 @@ canvas.addEventListener("touchmove", e => {
 canvas.addEventListener("touchend", () => {
   if (!aiming) return
 
-  let ix = (aimStart.x - aimNow.x) * LAUNCH_SCALE
-  let iy = (aimStart.y - aimNow.y) * LAUNCH_SCALE
-  const mag = Math.hypot(ix, iy)
-  if (mag > MAX_LAUNCH_IMPULSE) {
-    ix *= MAX_LAUNCH_IMPULSE / mag
-    iy *= MAX_LAUNCH_IMPULSE / mag
-  }
-
-  currentBall.vel.x = ix
-  currentBall.vel.y = iy
+  currentBall.vel.x = (aimStart.x - aimNow.x) * LAUNCH_POWER
+  currentBall.vel.y = (aimStart.y - aimNow.y) * LAUNCH_POWER
   balls.push(currentBall)
   spawn()
   aiming = false
