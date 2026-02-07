@@ -9,19 +9,17 @@ const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
 const CORE_RADIUS = 26
 
 // ================= PHYSICS =================
-const G = 0.38                    // pure inward gravity
-const SOFTEN = 1800
+const SLOPE_STRENGTH = 0.00045     // 🟢 The "lean" of the bowl (constant sliding)
+const CENTER_SUCTION = 0.45       // 🟢 Stronger pull at the very drain
+const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.38
+const BOWL_K = 0.015              // 🟢 Rim stiffness for the outer edge
 
 const BASE_DAMP = 0.996
 const SURFACE_DAMP = 0.94
 
 // ---- LAUNCH ----
 const LAUNCH_SCALE = 0.045
-const MAX_LAUNCH_SPEED = 7.2      // 🔒 CLAMPED (Sputnik rule)
-
-// ---- QUADRATIC BOWL ----
-const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.38
-const BOWL_K = 0.0018              // bowl stiffness (turnaround feel)
+const MAX_LAUNCH_SPEED = 7.2      
 
 // ================= GAME =================
 let balls = []
@@ -65,21 +63,27 @@ function applyPhysics(b) {
   const nx = dx / d
   const ny = dy / d
 
-  // ---- PURE GRAVITY ----
-  const g = G / (d2 + SOFTEN)
+  // ---- 1. THE SMOOTH SLOPE ----
+  // This makes the ball slide downward smoothly from any position
+  const slopeForce = d * SLOPE_STRENGTH
+  b.vel.x += nx * slopeForce
+  b.vel.y += ny * slopeForce
+
+  // ---- 2. THE DRAIN (Gravity) ----
+  // Increases suction as the ball gets closer to the black hole
+  const g = CENTER_SUCTION / (d * 0.05 + 1)
   b.vel.x += nx * g
   b.vel.y += ny * g
 
-  // ---- QUADRATIC BOWL (ENERGY TURNAROUND) ----
+  // ---- 3. THE OUTER RIM (Containment) ----
+  // If a ball is launched too hard, this acts as the bowl's edge
   if (d > BOWL_RADIUS) {
     const excess = d - BOWL_RADIUS
-    const fx = nx * excess * BOWL_K
-    const fy = ny * excess * BOWL_K
-    b.vel.x += fx
-    b.vel.y += fy
+    b.vel.x += nx * excess * BOWL_K
+    b.vel.y += ny * excess * BOWL_K
   }
 
-  // ---- GLOBAL DAMPING (size matters) ----
+  // ---- GLOBAL DAMPING ----
   const sizeDamp = 1 - b.r * 0.00018
   b.vel.x *= BASE_DAMP * sizeDamp
   b.vel.y *= BASE_DAMP * sizeDamp
@@ -89,13 +93,11 @@ function applyPhysics(b) {
   if (d < surfaceDist + 14) {
     const vx = b.vel.x
     const vy = b.vel.y
-
     const radial = vx * nx + vy * ny
     const tx = -ny
     const ty = nx
     let tangential = vx * tx + vy * ty
 
-    // prevent penetration
     if (radial < 0) {
       b.vel.x -= nx * radial
       b.vel.y -= ny * radial
@@ -156,7 +158,6 @@ function resolveCollisions() {
   }
 }
 
-// ================= MERGE =================
 function merge(a, b) {
   balls = balls.filter(x => x !== a && x !== b)
   balls.push(createBall(
@@ -166,12 +167,9 @@ function merge(a, b) {
   ))
 }
 
-// ================= TRAJECTORY =================
 function drawTrajectory() {
   if (!aiming) return
-
   let pos = { ...currentBall.pos }
-
   let vx = (aimStart.x - aimNow.x) * LAUNCH_SCALE
   let vy = (aimStart.y - aimNow.y) * LAUNCH_SCALE
   const mag = Math.hypot(vx, vy)
@@ -179,24 +177,15 @@ function drawTrajectory() {
     vx *= MAX_LAUNCH_SPEED / mag
     vy *= MAX_LAUNCH_SPEED / mag
   }
-
   let vel = { x: vx, y: vy }
 
   for (let i = 0; i < 160; i++) {
-    const fake = {
-      pos: { ...pos },
-      vel: { ...vel },
-      r: currentBall.r,
-      drift: 0
-    }
-
+    const fake = { pos: { ...pos }, vel: { ...vel }, r: currentBall.r, drift: 0 }
     applyPhysics(fake)
     pos = fake.pos
     vel = fake.vel
-
     const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
     if (d < CORE_RADIUS + currentBall.r) break
-
     ctx.fillStyle = `rgba(255,255,255,${1 - i / 160})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
@@ -204,7 +193,6 @@ function drawTrajectory() {
   }
 }
 
-// ================= DRAW =================
 function drawBall(b) {
   ctx.fillStyle = color(b.lvl)
   ctx.beginPath()
@@ -223,22 +211,17 @@ function color(l) {
   return ["#4dd0e1","#81c784","#ffd54f","#ff8a65","#ba68c8","#f06292"][l] || "#eee"
 }
 
-// ================= LOOP =================
 function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-
   balls.forEach(applyPhysics)
   resolveCollisions()
-
   drawCore()
   balls.forEach(drawBall)
   if (currentBall) drawBall(currentBall)
-
   drawTrajectory()
   requestAnimationFrame(loop)
 }
 
-// ================= INPUT =================
 canvas.addEventListener("touchstart", e => {
   aiming = true
   const t = e.touches[0]
@@ -254,7 +237,6 @@ canvas.addEventListener("touchmove", e => {
 
 canvas.addEventListener("touchend", () => {
   if (!aiming) return
-
   let vx = (aimStart.x - aimNow.x) * LAUNCH_SCALE
   let vy = (aimStart.y - aimNow.y) * LAUNCH_SCALE
   const mag = Math.hypot(vx, vy)
@@ -262,7 +244,6 @@ canvas.addEventListener("touchend", () => {
     vx *= MAX_LAUNCH_SPEED / mag
     vy *= MAX_LAUNCH_SPEED / mag
   }
-
   currentBall.vel.x = vx
   currentBall.vel.y = vy
   balls.push(currentBall)
@@ -270,11 +251,9 @@ canvas.addEventListener("touchend", () => {
   aiming = false
 })
 
-// ================= UTIL =================
 function randLevel() {
   return Math.floor(Math.random() * 3)
 }
 
-// ================= START =================
 spawn()
 loop()
