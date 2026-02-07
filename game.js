@@ -48,7 +48,7 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
 function spawn() {
   currentBall = createBall(
     canvas.width / 2,
-    canvas.height - 82,
+    canvas.height - 100,
     nextLevel
   )
   nextLevel = randLevel()
