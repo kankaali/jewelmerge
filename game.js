@@ -9,19 +9,18 @@ const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
 const CORE_RADIUS = 26
 
 // ================= PHYSICS =================
-const G = 0.38                    // pure inward gravity
-const SOFTEN = 1800
+const G = 0.52                    // ⬆ stronger blackhole gravity
+const SOFTEN = 1600
 
 const BASE_DAMP = 0.996
 const SURFACE_DAMP = 0.94
 
 // ---- LAUNCH ----
 const LAUNCH_SCALE = 0.045
-const MAX_LAUNCH_SPEED = 7.2      // 🔒 CLAMPED (Sputnik rule)
+const MAX_LAUNCH_SPEED = 7.2
 
-// ---- QUADRATIC BOWL ----
-const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.38
-const BOWL_K = 0.0018              // bowl stiffness (turnaround feel)
+// ---- CONTINUOUS QUADRATIC BOWL ----
+const BOWL_K = 0.00045            // smooth paraboloid strength
 
 // ================= GAME =================
 let balls = []
@@ -59,25 +58,21 @@ function spawn() {
 function applyPhysics(b) {
   const dx = CENTER.x - b.pos.x
   const dy = CENTER.y - b.pos.y
-  const d2 = dx * dx + dy * dy
-  const d = Math.sqrt(d2) + 0.0001
+  const d2 = dx * dx + dy * dy + 0.0001
+  const d = Math.sqrt(d2)
 
   const nx = dx / d
   const ny = dy / d
 
-  // ---- PURE GRAVITY ----
+  // ---- PURE BLACKHOLE GRAVITY ----
   const g = G / (d2 + SOFTEN)
   b.vel.x += nx * g
   b.vel.y += ny * g
 
-  // ---- QUADRATIC BOWL (ENERGY TURNAROUND) ----
-  if (d > BOWL_RADIUS) {
-    const excess = d - BOWL_RADIUS
-    const fx = nx * excess * BOWL_K
-    const fy = ny * excess * BOWL_K
-    b.vel.x += fx
-    b.vel.y += fy
-  }
+  // ---- CONTINUOUS QUADRATIC BOWL ----
+  // F = -k * r  (parabolic potential)
+  b.vel.x += nx * d * BOWL_K
+  b.vel.y += ny * d * BOWL_K
 
   // ---- GLOBAL DAMPING (size matters) ----
   const sizeDamp = 1 - b.r * 0.00018
@@ -193,9 +188,6 @@ function drawTrajectory() {
     applyPhysics(fake)
     pos = fake.pos
     vel = fake.vel
-
-    const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
-    if (d < CORE_RADIUS + currentBall.r) break
 
     ctx.fillStyle = `rgba(255,255,255,${1 - i / 160})`
     ctx.beginPath()
