@@ -15,13 +15,14 @@ const SOFTEN = 1600
 const BASE_DAMP = 0.996
 const SURFACE_DAMP = 0.94
 
-// ---- LAUNCH ----
+// ================= LAUNCH =================
 const LAUNCH_SCALE = 0.045
+const MIN_LAUNCH_SPEED = 2.4
 const MAX_LAUNCH_SPEED = 7.2
 
-// ---- FINITE QUADRATIC BOWL ----
-const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.35 // 👈 CONTROL SIZE HERE
-const BOWL_K = 0.0012                                            // 👈 CONTROL STRENGTH HERE
+// ================= BOWL =================
+const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.35
+const BOWL_K = 0.0012
 
 // ================= GAME =================
 let balls = []
@@ -35,13 +36,16 @@ let aimNow = null
 // ================= BALL =================
 function createBall(x, y, lvl, vx = 0, vy = 0) {
   const r = 22 + lvl * 6
+  const mass = r * r * 0.02     // 🔥 quadratic mass (heaviness)
+
   return {
     pos: { x, y },
     vel: { x: vx, y: vy },
     r,
+    mass,
     lvl,
     surface: false,
-    drift: (Math.random() - 0.5) * 0.00035
+    drift: (Math.random() - 0.5) * 0.00035 / mass // 🔥 heavier = less jitter
   }
 }
 
@@ -49,7 +53,7 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
 function spawn() {
   currentBall = createBall(
     canvas.width / 2,
-    canvas.height - 110, // 👈 LAUNCH DISTANCE FROM BLACKHOLE
+    canvas.height - 110,
     nextLevel
   )
   nextLevel = randLevel()
@@ -77,7 +81,7 @@ function applyPhysics(b) {
     b.vel.y += ny * excess * BOWL_K
   }
 
-  // ---- GLOBAL DAMPING ----
+  // ---- GLOBAL DAMPING (size + mass) ----
   const sizeDamp = 1 - b.r * 0.00018
   b.vel.x *= BASE_DAMP * sizeDamp
   b.vel.y *= BASE_DAMP * sizeDamp
@@ -98,7 +102,10 @@ function applyPhysics(b) {
       b.vel.y -= ny * radial
     }
 
-    tangential *= SURFACE_DAMP
+    // 🔥 mass-aware surface rolling
+    const inertia = 1 / b.mass
+    tangential *= SURFACE_DAMP * inertia
+
     b.vel.x = tx * tangential + tx * b.drift
     b.vel.y = ty * tangential + ty * b.drift
 
@@ -138,10 +145,12 @@ function resolveCollisions() {
         if (a.surface || b.surface) {
           const tx = -ny
           const ty = nx
-          a.vel.x += tx * 0.01
-          a.vel.y += ty * 0.01
-          b.vel.x -= tx * 0.01
-          b.vel.y -= ty * 0.01
+          const push = 0.01 / (a.mass + b.mass) // 🔥 heavy balls ignore nudges
+
+          a.vel.x += tx * push
+          a.vel.y += ty * push
+          b.vel.x -= tx * push
+          b.vel.y -= ty * push
         }
 
         if (a.lvl === b.lvl) {
@@ -171,10 +180,15 @@ function drawTrajectory() {
 
   let vx = (aimStart.x - aimNow.x) * LAUNCH_SCALE
   let vy = (aimStart.y - aimNow.y) * LAUNCH_SCALE
-  const mag = Math.hypot(vx, vy)
-  if (mag > MAX_LAUNCH_SPEED) {
-    vx *= MAX_LAUNCH_SPEED / mag
-    vy *= MAX_LAUNCH_SPEED / mag
+  let speed = Math.hypot(vx, vy)
+
+  if (speed < MIN_LAUNCH_SPEED) {
+    vx *= MIN_LAUNCH_SPEED / speed
+    vy *= MIN_LAUNCH_SPEED / speed
+  }
+  if (speed > MAX_LAUNCH_SPEED) {
+    vx *= MAX_LAUNCH_SPEED / speed
+    vy *= MAX_LAUNCH_SPEED / speed
   }
 
   let vel = { x: vx, y: vy }
@@ -184,7 +198,9 @@ function drawTrajectory() {
       pos: { ...pos },
       vel: { ...vel },
       r: currentBall.r,
-      drift: 0
+      mass: currentBall.mass,
+      drift: 0,
+      surface: false
     }
 
     applyPhysics(fake)
@@ -196,8 +212,7 @@ function drawTrajectory() {
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
 
-    const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
-    if (d < CORE_RADIUS + currentBall.r) break
+    if (Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y) < CORE_RADIUS + currentBall.r) break
   }
 }
 
@@ -254,10 +269,15 @@ canvas.addEventListener("touchend", () => {
 
   let vx = (aimStart.x - aimNow.x) * LAUNCH_SCALE
   let vy = (aimStart.y - aimNow.y) * LAUNCH_SCALE
-  const mag = Math.hypot(vx, vy)
-  if (mag > MAX_LAUNCH_SPEED) {
-    vx *= MAX_LAUNCH_SPEED / mag
-    vy *= MAX_LAUNCH_SPEED / mag
+  let speed = Math.hypot(vx, vy)
+
+  if (speed < MIN_LAUNCH_SPEED) {
+    vx *= MIN_LAUNCH_SPEED / speed
+    vy *= MIN_LAUNCH_SPEED / speed
+  }
+  if (speed > MAX_LAUNCH_SPEED) {
+    vx *= MAX_LAUNCH_SPEED / speed
+    vy *= MAX_LAUNCH_SPEED / speed
   }
 
   currentBall.vel.x = vx
