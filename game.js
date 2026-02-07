@@ -16,7 +16,7 @@ const BASE_DAMP = 0.996
 const SURFACE_DAMP = 0.94
 
 // ================= LAUNCH =================
-const LAUNCH_SCALE = 0.045
+const LAUNCH_SCALE = 0.035
 const MIN_LAUNCH_SPEED = 2.4
 const MAX_LAUNCH_SPEED = 7.2
 
