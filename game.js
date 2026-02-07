@@ -20,8 +20,8 @@ const LAUNCH_SCALE = 0.045
 const MAX_LAUNCH_SPEED = 7.2
 
 // ---- FINITE QUADRATIC BOWL ----
-const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.30 // 👈 CONTROL SIZE HERE
-const BOWL_K = 0.0011                                            // 👈 CONTROL STRENGTH HERE
+const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.35 // 👈 CONTROL SIZE HERE
+const BOWL_K = 0.0012                                            // 👈 CONTROL STRENGTH HERE
 
 // ================= GAME =================
 let balls = []
@@ -49,7 +49,7 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
 function spawn() {
   currentBall = createBall(
     canvas.width / 2,
-    canvas.height - 70, // 👈 LAUNCH DISTANCE FROM BLACKHOLE
+    canvas.height - 110, // 👈 LAUNCH DISTANCE FROM BLACKHOLE
     nextLevel
   )
   nextLevel = randLevel()
