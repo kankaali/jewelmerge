@@ -9,7 +9,7 @@ const CENTER = { x: canvas.width / 2, y: canvas.height * 0.28 }
 const CORE_RADIUS = 26
 
 // ================= PHYSICS =================
-const G = 0.52                    // ⬆ stronger blackhole gravity
+const G = 0.52
 const SOFTEN = 1600
 
 const BASE_DAMP = 0.996
@@ -19,8 +19,9 @@ const SURFACE_DAMP = 0.94
 const LAUNCH_SCALE = 0.045
 const MAX_LAUNCH_SPEED = 7.2
 
-// ---- CONTINUOUS QUADRATIC BOWL ----
-const BOWL_K = 0.00045            // smooth paraboloid strength
+// ---- FINITE QUADRATIC BOWL ----
+const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.42 // 👈 CONTROL SIZE HERE
+const BOWL_K = 0.0011                                            // 👈 CONTROL STRENGTH HERE
 
 // ================= GAME =================
 let balls = []
@@ -48,7 +49,7 @@ function createBall(x, y, lvl, vx = 0, vy = 0) {
 function spawn() {
   currentBall = createBall(
     canvas.width / 2,
-    canvas.height - 100,
+    canvas.height - 100, // 👈 LAUNCH DISTANCE FROM BLACKHOLE
     nextLevel
   )
   nextLevel = randLevel()
@@ -64,17 +65,19 @@ function applyPhysics(b) {
   const nx = dx / d
   const ny = dy / d
 
-  // ---- PURE BLACKHOLE GRAVITY ----
+  // ---- BLACKHOLE GRAVITY ----
   const g = G / (d2 + SOFTEN)
   b.vel.x += nx * g
   b.vel.y += ny * g
 
-  // ---- CONTINUOUS QUADRATIC BOWL ----
-  // F = -k * r  (parabolic potential)
-  b.vel.x += nx * d * BOWL_K
-  b.vel.y += ny * d * BOWL_K
+  // ---- FINITE QUADRATIC BOWL ----
+  if (d > BOWL_RADIUS) {
+    const excess = d - BOWL_RADIUS
+    b.vel.x += nx * excess * BOWL_K
+    b.vel.y += ny * excess * BOWL_K
+  }
 
-  // ---- GLOBAL DAMPING (size matters) ----
+  // ---- GLOBAL DAMPING ----
   const sizeDamp = 1 - b.r * 0.00018
   b.vel.x *= BASE_DAMP * sizeDamp
   b.vel.y *= BASE_DAMP * sizeDamp
@@ -90,7 +93,6 @@ function applyPhysics(b) {
     const ty = nx
     let tangential = vx * tx + vy * ty
 
-    // prevent penetration
     if (radial < 0) {
       b.vel.x -= nx * radial
       b.vel.y -= ny * radial
@@ -177,7 +179,7 @@ function drawTrajectory() {
 
   let vel = { x: vx, y: vy }
 
-  for (let i = 0; i < 160; i++) {
+  for (let i = 0; i < 180; i++) {
     const fake = {
       pos: { ...pos },
       vel: { ...vel },
@@ -189,10 +191,13 @@ function drawTrajectory() {
     pos = fake.pos
     vel = fake.vel
 
-    ctx.fillStyle = `rgba(255,255,255,${1 - i / 160})`
+    ctx.fillStyle = `rgba(255,255,255,${1 - i / 180})`
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
+
+    const d = Math.hypot(pos.x - CENTER.x, pos.y - CENTER.y)
+    if (d < CORE_RADIUS + currentBall.r) break
   }
 }
 
