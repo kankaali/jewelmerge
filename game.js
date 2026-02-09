@@ -24,13 +24,13 @@ const MAX_LAUNCH_SPEED = 7.2
 // Radius of invisible circular "arena"
 // Balls are free INSIDE this radius
 // Only outside this does the bowl force appear
-const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.38
+const BOWL_RADIUS = Math.min(canvas.width, canvas.height) * 0.15
 // 👆 Increase → wider playable area
 // 👆 Decrease → tighter, more focused orbits
 
 // Strength of the quadratic pull back toward center
 // Acts like a soft wall, not a hard collision
-const BOWL_K = 0.00045
+const BOWL_K = 0.008
 // 👆 Increase → stronger pull back when escaping
 // 👆 Decrease → looser, floatier outer space
 
